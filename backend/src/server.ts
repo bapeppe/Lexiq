@@ -7,7 +7,7 @@ import { Session, ReviewSubmission } from './http/models';
 
 async function start() {
   console.log('Lexiq API V2 in partenza...');
-  const mongoUri = 'mongodb://100.96.72.20:27017/lexiq_db';
+  const mongoUri = process.env.MONGO_URI || 'mongodb://mongodb:27017/lexiq_db';
   await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 10000 });
   await seedWords();
   await Promise.all([User.init(), Word.init(), UserWordProgress.init(), Streak.init(), Session.init(), ReviewSubmission.init()]);
