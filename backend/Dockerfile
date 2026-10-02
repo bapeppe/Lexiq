@@ -1,5 +1,5 @@
 # Usa un'immagine Node.js leggera
-FROM node:18-alpine
+FROM node:22-alpine
 
 # Imposta la cartella di lavoro all'interno del container
 WORKDIR /usr/src/app
