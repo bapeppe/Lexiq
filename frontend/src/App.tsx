@@ -6,39 +6,38 @@ import {
   AudioLines,
   BookOpen,
   Check,
-  CheckCheck,
-  ChevronRight,
   Flame,
-  Focus,
   Layers,
   LoaderCircle,
-  LockKeyhole,
   LogOut,
   Moon,
   Search,
   Sparkles,
   Sun,
-  Target,
-  Trophy,
   X,
 } from "lucide-react";
+import { pronounce, stopPronunciation } from "./lib/audio";
 
-type User = { id: string; name: string; email: string };
+type User = { id: string; name: string; email: string; dailyTarget: number };
 type Word = {
   id: string;
   word: string;
   definition: string;
-  level: string;
+  level?: string;
   ipa: string;
   examples: string[];
   collocations: string[];
   partOfSpeech: string;
+  senses: { definition: string; partOfSpeech: string; context: string }[];
+  source?: string;
+  sourceUrl?: string;
+  license?: string;
+  audioUrl?: string;
+  audioSourceUrl?: string;
 };
 type Card = {
   id: string;
   word: Word;
-  repetitions: number;
-  interval: number;
   mastery: "learning" | "familiar" | "mastered";
 };
 type Status = {
@@ -49,16 +48,13 @@ type Status = {
   newWordsUnlocked: boolean;
   dailyLimit: number;
   acquiredToday: number;
+  availableToday: number | null;
   day: string;
 };
 type Stats = {
   totalWords: number;
-  learning: number;
-  familiar: number;
-  mastered: number;
   retention: number;
   reviewCount: number;
-  streak: number;
   longestStreak: number;
   retentionHistory: {
     date: string;
@@ -66,24 +62,19 @@ type Stats = {
     retention: number | null;
   }[];
 };
-function submissionId() {
-  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  bytes[6] = (bytes[6] & 15) | 64;
-  bytes[8] = (bytes[8] & 63) | 128;
-  const hex = Array.from(bytes, (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
 type View = "today" | "review" | "discover" | "vault";
-const masteryLabels: Record<string, string> = {
-  all: "Tutte",
+type Mode = "flashcard" | "recall" | "cloze";
+type DailyWords = { words: Word[]; seenIds: string[]; status: Status };
+const masteryLabels = {
   learning: "Da imparare",
   familiar: "Familiari",
   mastered: "Padroneggiate",
 };
-type Mode = "flashcard" | "recall" | "cloze";
+const modeLabels = {
+  flashcard: "Schede",
+  recall: "Scrivi la parola",
+  cloze: "Completa la frase",
+};
 async function api<T>(path: string, body?: unknown): Promise<T> {
   let response: Response;
   try {
@@ -94,59 +85,34 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
         ? {}
         : { method: "POST", body: JSON.stringify(body) }),
     });
-  } catch (err) {
-    throw new Error("Impossibile connettersi al server. Controlla la connessione.");
-  }
-
-  const text = await response.text();
-  let result: any;
-  try {
-    result = text ? JSON.parse(text) : {};
-  } catch (err) {
+  } catch {
     throw new Error(
-      response.ok
-        ? "Il server ha restituito una risposta non valida."
-        : `Errore del server (${response.status}). Riprova più tardi.`
+      "Impossibile connettersi al server. Controlla la connessione.",
     );
   }
-
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error(
+      "Il server ha restituito una risposta non valida. Riprova più tardi.",
+    );
+  }
   if (!response.ok)
     throw new Error(
-      result.error?.message ||
-        result.message ||
-        "Si è verificato un errore. Riprova.",
+      result.error?.message || "Si è verificato un errore. Riprova.",
     );
   return result as T;
 }
-function pronounce(word: string, onError: (message: string) => void) {
-  if (!("speechSynthesis" in window)) {
-    onError("La pronuncia audio non è disponibile in questo browser.");
-    return;
-  }
-  window.speechSynthesis.cancel();
-  const speech = new SpeechSynthesisUtterance(word);
-  speech.lang = "en-GB";
-  speech.rate = 0.85;
-  speech.onerror = () =>
-    onError("Impossibile riprodurre la pronuncia. Riprova.");
-  window.speechSynthesis.speak(speech);
-}
-function Context({ word }: { word: Word }) {
-  const sentence = word.examples[0] || "";
-  const index = sentence.toLowerCase().indexOf(word.word.toLowerCase());
-  return (
-    <p className="context">
-      {index < 0 ? (
-        sentence
-      ) : (
-        <>
-          {sentence.slice(0, index)}
-          <mark>{sentence.slice(index, index + word.word.length)}</mark>
-          {sentence.slice(index + word.word.length)}
-        </>
-      )}
-    </p>
-  );
+function submissionId() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = Array.from(bytes, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 function WordDetail({
   word,
@@ -155,67 +121,283 @@ function WordDetail({
   word: Word;
   onError: (message: string) => void;
 }) {
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => () => stopPronunciation(), [word.id]);
   return (
     <>
       <div className="word-heading">
         <div>
-          <span className="badge">{word.level}</span>
-          <span className="muted word-part">{word.partOfSpeech}</span>
-          <h2>{word.word}</h2>
-          <span className="ipa">{word.ipa}</span>
+          <div className="word-meta">
+            {word.level && <span className="badge">{word.level}</span>}
+            <span>{word.partOfSpeech}</span>
+          </div>
+          <h2 lang="en">{word.word}</h2>
+          {word.ipa && <span className="ipa">{word.ipa}</span>}
         </div>
         <button
-          className="icon-button"
+          className="audio-button"
+          disabled={playing}
           aria-label={`Ascolta la pronuncia di ${word.word}`}
-          onClick={() => pronounce(word.word, onError)}
+          onClick={async () => {
+            setPlaying(true);
+            try {
+              await pronounce(word);
+            } catch (error) {
+              onError((error as Error).message);
+            } finally {
+              setPlaying(false);
+            }
+          }}
         >
-          <AudioLines size={22} />
+          {playing ? (
+            <LoaderCircle className="spin" size={22} />
+          ) : (
+            <AudioLines size={22} />
+          )}
         </button>
       </div>
       <p className="definition">{word.definition}</p>
-      <span className="eyebrow">NEL CONTESTO</span>
-      <Context word={word} />
-      <span className="eyebrow">COMBINAZIONI DI PAROLE</span>
-      <div className="collocations">
-        {word.collocations.map((text) => (
-          <span key={text}>{text}</span>
-        ))}
-      </div>
+      {(word.examples.length > 0 ||
+        word.collocations.length > 0 ||
+        word.senses?.length > 1 ||
+        word.sourceUrl ||
+        word.audioSourceUrl) && (
+        <details className="word-details" key={word.id}>
+          <summary>Approfondisci</summary>
+          {word.examples.length > 0 && (
+            <div>
+              <h3>Esempio</h3>
+              <p lang="en" className="context">
+                {word.examples[0]}
+              </p>
+            </div>
+          )}
+          {word.collocations.length > 0 && (
+            <div>
+              <h3>Combinazioni di parole</h3>
+              <div lang="en" className="collocations">
+                {word.collocations.map((text) => (
+                  <span key={text}>{text}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {word.senses?.length > 1 && (
+            <div>
+              <h3>Altri significati</h3>
+              <ul className="sense-list">
+                {word.senses
+                  .filter(
+                    (sense) =>
+                      sense.definition !== word.definition ||
+                      sense.partOfSpeech !== word.partOfSpeech,
+                  )
+                  .map((sense, index) => (
+                    <li key={index}>
+                      <small>{sense.partOfSpeech}</small>
+                      <p>{sense.definition}</p>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
+          <div className="sources">
+            {word.sourceUrl && (
+              <a href={word.sourceUrl} target="_blank" rel="noreferrer">
+                {word.source || "Fonte"}
+                {word.license ? ` · ${word.license}` : ""}
+              </a>
+            )}
+            {word.audioSourceUrl && (
+              <a href={word.audioSourceUrl} target="_blank" rel="noreferrer">
+                Fonte audio e licenza
+              </a>
+            )}
+          </div>
+        </details>
+      )}
     </>
   );
 }
-function RetentionChart({ history }: { history: Stats["retentionHistory"] }) {
-  const observed = history.some((point) => point.retention !== null);
+function Auth({ onLogin }: { onLogin: (user: User) => void }) {
+  const [signup, setSignup] = useState(true);
+  const [target, setTarget] = useState(5);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   return (
-    <section className="retention-chart">
-      <div className="retention-chart-heading">
-        <div>
-          <h2>Un’abitudine che prende forma.</h2>
-          <p>Quanto hai ricordato negli ultimi sette giorni</p>
-        </div>
-        <span className="badge">ULTIMI 7 GIORNI · UTC</span>
-      </div>
-      {!observed && (
-        <p className="chart-empty">
-          Il grafico si aggiornerà dopo il tuo primo ripasso.
+    <main className="auth-layout">
+      <section className="auth-intro">
+        <a className="brand" href="/">
+          lexiq<span>.</span>
+        </a>
+        <h1>
+          Il tuo inglese,
+          <br />
+          una parola alla volta.
+        </h1>
+        <p>
+          Scopri nuove parole e ricorda quelle che impari.
+          <br />
+          Bastano pochi minuti al giorno.
         </p>
-      )}
-      <div className="chart-bars" aria-label="Percentuale giornaliera di risposte ricordate">
-        {history.map((point) => (
-          <div className="chart-column" key={point.date}>
+      </section>
+      <form
+        className="auth-form panel"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setBusy(true);
+          setError("");
+          const data = new FormData(event.currentTarget);
+          try {
+            const result = await api<{ user: User }>(
+              signup ? "/auth/signup" : "/auth/login",
+              {
+                ...(signup
+                  ? { name: data.get("name"), dailyTarget: target }
+                  : {}),
+                email: data.get("email"),
+                password: data.get("password"),
+              },
+            );
+            onLogin(result.user);
+          } catch (err) {
+            setError((err as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <h2>{signup ? "Crea il tuo account" : "Bentornato"}</h2>
+        {signup && (
+          <label>
+            Nome
+            <input
+              name="name"
+              autoComplete="name"
+              placeholder="Giulia"
+              minLength={2}
+              maxLength={80}
+              required
+            />
+          </label>
+        )}
+        <label>
+          Email
+          <input
+            name="email"
+            type="email"
+            autoComplete="email"
+            placeholder="tu@esempio.it"
+            required
+          />
+        </label>
+        <label>
+          Password
+          <input
+            name="password"
+            type="password"
+            autoComplete={signup ? "new-password" : "current-password"}
+            placeholder={signup ? "Almeno 10 caratteri" : "La tua password"}
+            minLength={signup ? 10 : 1}
+            maxLength={128}
+            required
+          />
+        </label>
+        {signup && (
+          <fieldset className="daily-target">
+            <legend>Nuove parole al giorno</legend>
+            <div className="target-options">
+              {[3, 5, 10].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={target === value}
+                  className={target === value ? "active" : ""}
+                  onClick={() => setTarget(value)}
+                >
+                  {value}
+                </button>
+              ))}
+              <label className="custom-target">
+                Personalizza
+                <input
+                  name="dailyTarget"
+                  aria-label="Numero di nuove parole al giorno"
+                  type="number"
+                  min={1}
+                  max={20}
+                  step={1}
+                  value={Number.isNaN(target) ? "" : target}
+                  onChange={(event) => setTarget(event.target.valueAsNumber)}
+                  required
+                />
+              </label>
+            </div>
+            <p className="muted">
+              Da 1 a 20 parole. I ripassi si aggiungono al tuo obiettivo.
+            </p>
+          </fieldset>
+        )}
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <button className="button primary full" disabled={busy}>
+          {busy ? (
+            <LoaderCircle className="spin" size={18} />
+          ) : signup ? (
+            "Inizia a imparare"
+          ) : (
+            "Accedi"
+          )}
+          <ArrowRight size={18} />
+        </button>
+        <p className="auth-switch">
+          {signup ? "Hai già un account?" : "Non hai ancora un account?"}{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setSignup(!signup);
+              setError("");
+            }}
+          >
+            {signup ? "Accedi" : "Registrati"}
+          </button>
+        </p>
+      </form>
+    </main>
+  );
+}
+function Progress({ stats, status }: { stats: Stats; status: Status }) {
+  return (
+    <div className="progress-content">
+      <div className="stats-grid">
+        <div>
+          <strong>{stats.totalWords}</strong>
+          <span>Parole nel vocabolario</span>
+        </div>
+        <div>
+          <strong>{stats.reviewCount ? `${stats.retention}%` : "—"}</strong>
+          <span>Risposte ricordate</span>
+        </div>
+        <div>
+          <strong>{status.longestStreak}</strong>
+          <span>Record di giorni consecutivi</span>
+        </div>
+      </div>
+      <h3>Ripassi negli ultimi sette giorni</h3>
+      <div
+        className="chart-bars"
+        aria-label="Percentuale di ricordo giornaliera"
+      >
+        {stats.retentionHistory.map((point) => (
+          <div key={point.date} className="chart-column">
+            <span>
+              {point.retention === null ? "—" : `${point.retention}%`}
+            </span>
             <div className="chart-track">
-              <div
-                className={`chart-bar ${point.retention === null ? "no-data" : ""}`}
-                style={{
-                  height:
-                    point.retention === null
-                      ? "3px"
-                      : `${Math.max(3, point.retention)}%`,
-                }}
-              />
-              <span className="chart-value">
-                {point.retention === null ? "—" : `${point.retention}%`}
-              </span>
+              <div style={{ height: `${point.retention || 0}%` }} />
             </div>
             <span>
               {new Intl.DateTimeFormat("it-IT", {
@@ -223,156 +405,16 @@ function RetentionChart({ history }: { history: Stats["retentionHistory"] }) {
                 timeZone: "UTC",
               }).format(new Date(point.date + "T12:00:00Z"))}
             </span>
-            <span className="chart-reviews">
-              {point.reviews ? `${point.reviews} ripassi` : "Nessun ripasso"}
-            </span>
           </div>
         ))}
       </div>
-    </section>
-  );
-}
-function Auth({ onLogin }: { onLogin: (user: User) => void }) {
-  const [signup, setSignup] = useState(true);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  return (
-    <main className="auth-layout">
-      <section className="auth-story">
-        <div className="brand">
-          <div className="brand-symbol">
-            <Layers size={22} />
-          </div>
-          lexiq<span className="brand-dot">.</span>
-        </div>
-        <div className="auth-copy">
-          <span className="eyebrow">UN PO’ OGNI GIORNO. TANTO NEL TEMPO.</span>
-          <h1>
-            Fai entrare le parole
-            <br />
-            nel tuo mondo.
-          </h1>
-          <p>
-            Migliora il tuo inglese, con calma. Ricorda ciò che impari, scopri
-            nuove parole e costruisci un’abitudine che dura.
-          </p>
-          <div className="auth-preview">
-            <div className="preview-head">
-              <span className="badge">B2</span>
-              <Sparkles size={19} />
-            </div>
-            <h2>serendipity</h2>
-            <span className="ipa">/ˌser.ənˈdɪp.ə.ti/</span>
-            <p>La felice scoperta di qualcosa che non stavi cercando.</p>
-            <div className="preview-foot">
-              <span className="little-dot" />
-              Una parola. Una nuova possibilità.
-            </div>
-          </div>
-        </div>
-        <span className="auth-footer">Piccoli passi. Conoscenze che restano.</span>
-      </section>
-      <section className="auth-form-wrap">
-        <form
-          className="auth-form"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            setBusy(true);
-            setError("");
-            const data = new FormData(event.currentTarget);
-            try {
-              const result = await api<{ user: User }>(
-                signup ? "/auth/signup" : "/auth/login",
-                {
-                  ...(signup ? { name: data.get("name") } : {}),
-                  email: data.get("email"),
-                  password: data.get("password"),
-                },
-              );
-              onLogin(result.user);
-            } catch (err) {
-              setError((err as Error).message);
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          <span className="eyebrow">IL TUO MOMENTO QUOTIDIANO PER CRESCERE</span>
-          <h2>{signup ? "Inizia a imparare ogni giorno." : "Bentornato."}</h2>
-          <p className="muted">
-            {signup
-              ? "Il tuo prossimo capitolo inizia con una parola."
-              : "Le tue parole ti aspettano."}
-          </p>
-          {signup && (
-            <label>
-              Il tuo nome
-              <input
-                name="name"
-                autoComplete="name"
-                placeholder="Giulia"
-                minLength={2}
-                maxLength={80}
-                required
-              />
-            </label>
-          )}
-          <label>
-            Indirizzo email
-            <input
-              name="email"
-              type="email"
-              autoComplete="email"
-              placeholder="tu@esempio.it"
-              required
-            />
-          </label>
-          <label>
-            Password
-            <input
-              name="password"
-              type="password"
-              autoComplete={signup ? "new-password" : "current-password"}
-              placeholder={signup ? "Almeno 10 caratteri" : "La tua password"}
-              minLength={signup ? 10 : 1}
-              maxLength={128}
-              required
-            />
-          </label>
-          {error && (
-            <p className="form-error" role="alert">
-              {error}
-            </p>
-          )}
-          <button className="button primary full" disabled={busy}>
-            {busy ? (
-              <LoaderCircle className="spin" size={18} />
-            ) : (
-              <>
-                {signup ? "Crea il tuo account" : "Accedi"}
-                <ArrowRight size={18} />
-              </>
-            )}
-          </button>
-          <p className="auth-switch">
-            {signup ? "Hai già un account?" : "È la tua prima volta su Lexiq?"}{" "}
-            <button
-              type="button"
-              onClick={() => {
-                setSignup(!signup);
-                setError("");
-              }}
-            >
-              {signup ? "Accedi" : "Crea un account"}
-            </button>
-          </p>
-          <div className="auth-note">
-            <LockKeyhole size={15} />
-            I tuoi progressi vengono salvati, giorno dopo giorno.
-          </div>
-        </form>
-      </section>
-    </main>
+      <p className="muted">
+        {stats.reviewCount
+          ? "I ripassi liberi non modificano questi progressi."
+          : "Completa il primo ripasso programmato per iniziare."}{" "}
+        Il giorno di allenamento cambia a mezzanotte UTC.
+      </p>
+    </div>
   );
 }
 function App() {
@@ -387,37 +429,40 @@ function App() {
   const [due, setDue] = useState<Card[]>([]);
   const [vault, setVault] = useState<Card[]>([]);
   const [newWords, setNewWords] = useState<Word[]>([]);
+  const [seenIds, setSeenIds] = useState<string[]>([]);
+  const [discoveryIndex, setDiscoveryIndex] = useState(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [failedWordId, setFailedWordId] = useState<string | null>(null);
+  const [saveAttempt, setSaveAttempt] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [retryRating, setRetryRating] = useState<number | null>(null);
-  const [today] = useState(() => new Date());
-  const [celebrate, setCelebrate] = useState(false);
   const [mode, setMode] = useState<Mode>("flashcard");
   const [revealed, setRevealed] = useState(false);
   const [answer, setAnswer] = useState("");
-  const [reviewed, setReviewed] = useState(0);
+  const [reviewTab, setReviewTab] = useState<"due" | "all">("due");
+  const [practice, setPractice] = useState<Card[] | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [visibleCount, setVisibleCount] = useState(30);
   const [selected, setSelected] = useState<Word | null>(null);
-  const [discoveryIndex, setDiscoveryIndex] = useState(0);
+  const [retryRating, setRetryRating] = useState<number | null>(null);
   const pendingSubmission = useRef<{
     progressId: string;
     rating: number;
     submissionId: string;
   } | null>(null);
+  const wordSaving = useRef(false);
   const touchStart = useRef<number | null>(null);
   const refresh = useCallback(async () => {
-    const [daily, metrics, reviews, words] = await Promise.all([
+    const [daily, reviews, words] = await Promise.all([
       api<Status>("/daily/status"),
-      api<Stats>("/stats"),
       api<{ cards: Card[] }>("/reviews/due"),
       api<{ cards: Card[] }>("/vault"),
     ]);
     setStatus(daily);
-    setStats(metrics);
     setDue(reviews.cards);
     setVault(words.cards);
+    setStats(null);
   }, []);
   useEffect(() => {
     void api<{ user: User }>("/auth/me")
@@ -426,123 +471,109 @@ function App() {
       .finally(() => setInitializing(false));
   }, []);
   useEffect(() => {
-    if (user) {
+    if (user)
       void Promise.resolve()
         .then(refresh)
         .catch((err) => setError(err.message))
         .finally(() => setLoading(false));
-    }
   }, [user, refresh]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     try {
       localStorage.setItem("lexiq-theme", theme);
-    } catch {
-      /* Theme still applies when storage is unavailable. */
-    }
+    } catch {}
   }, [theme]);
   useEffect(() => {
-    if (!selected && !celebrate) return;
+    if (!selected) return;
     const previous = document.activeElement as HTMLElement | null;
-    const dialog = document.querySelector<HTMLElement>("[role=dialog]");
-    const focusable = () =>
-      Array.from(
-        dialog?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), input, [tabindex="0"]',
-        ) || [],
-      );
-    focusable()[0]?.focus();
-    const trap = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") return;
-      const targets = focusable();
-      const first = targets[0];
-      const last = targets.at(-1);
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first?.focus();
-      }
-    };
-    document.addEventListener("keydown", trap);
-    const oldOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const dialog = document.querySelector<HTMLDialogElement>("dialog");
+    dialog?.showModal();
     return () => {
-      document.removeEventListener("keydown", trap);
-      document.body.style.overflow = oldOverflow;
+      dialog?.close();
       previous?.focus();
     };
-  }, [selected, celebrate]);
-  const current = due[0];
-  const clozeOptions = current
-    ? (() => {
-        const hash = Array.from(current.word.word).reduce(
-          (sum, character) => sum + character.charCodeAt(0),
-          0,
-        );
-        const peers = [
-          ...new Set([...vault, ...due].map((card) => card.word.word)),
-        ]
-          .filter((word) => word !== current.word.word)
-          .sort();
-        const alternatives = peers
-          .slice(hash % Math.max(1, peers.length))
-          .concat(peers)
-          .slice(0, 3);
-        const options = [...new Set(alternatives)];
-        options.splice(hash % (options.length + 1), 0, current.word.word);
-        return options;
-      })()
-    : [];
+  }, [selected]);
+  const discoveryWord =
+    view === "discover" ? newWords[discoveryIndex] : undefined;
+  const discoverySeen = discoveryWord
+    ? seenIds.includes(discoveryWord.id)
+    : true;
+  const savingWord =
+    !!discoveryWord && !discoverySeen && failedWordId !== discoveryWord.id;
+  useEffect(() => {
+    if (!discoveryWord || discoverySeen) return;
+    let active = true;
+    wordSaving.current = true;
+    void api<{ status: Status }>("/words/seen", { wordId: discoveryWord.id })
+      .then(async (result) => {
+        if (!active) return;
+        await refresh();
+        if (!active) return;
+        wordSaving.current = false;
+        setFailedWordId(null);
+        setSeenIds((ids) => [...new Set([...ids, discoveryWord.id])]);
+        setStatus(result.status);
+      })
+      .catch((err) => {
+        if (active) {
+          setError(err.message);
+          setFailedWordId(discoveryWord.id);
+          wordSaving.current = false;
+        }
+      });
+    return () => {
+      active = false;
+      wordSaving.current = false;
+    };
+  }, [discoveryWord, discoverySeen, saveAttempt, refresh]);
+  const current = practice ? practice[0] : due[0];
+  const freeReview = practice !== null;
   const submitReview = useCallback(
     async (rating: number) => {
       if (!current || busy || !revealed) return;
+      if (freeReview) {
+        setPractice((cards) => cards!.slice(1));
+        setRevealed(false);
+        setAnswer("");
+        return;
+      }
       if (
         pendingSubmission.current?.progressId === current.id &&
         pendingSubmission.current.rating !== rating
       )
         return;
-      setBusy(true);
-      setError("");
       const submission =
-        pendingSubmission.current?.progressId === current.id &&
-        pendingSubmission.current.rating === rating
+        pendingSubmission.current?.progressId === current.id
           ? pendingSubmission.current
           : { progressId: current.id, rating, submissionId: submissionId() };
       pendingSubmission.current = submission;
       setRetryRating(rating);
+      setBusy(true);
+      setError("");
       try {
-        const result = await api<{ status: Status }>(
-          "/reviews/submit",
-          submission,
-        );
+        await api("/reviews/submit", submission);
         await refresh();
         pendingSubmission.current = null;
         setRetryRating(null);
-        setReviewed((count) => count + 1);
         setRevealed(false);
         setAnswer("");
-        if (result.status.pendingReviews === 0) {
-          setCelebrate(true);
-          navigator.vibrate?.([30, 30, 60]);
-        }
       } catch (err) {
         setError((err as Error).message);
       } finally {
         setBusy(false);
       }
     },
-    [current, busy, revealed, refresh],
+    [current, busy, revealed, freeReview, refresh],
   );
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (
         view !== "review" ||
         !current ||
-        celebrate ||
         busy ||
-        ["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A"].includes(
+        selected ||
+        (!freeReview && reviewTab === "all") ||
+        ["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A", "SUMMARY"].includes(
           (event.target as HTMLElement).tagName,
         )
       )
@@ -550,1048 +581,883 @@ function App() {
       if (event.code === "Space") {
         event.preventDefault();
         setRevealed(true);
-      } else if (["1", "2", "3", "4"].includes(event.key) && revealed) {
+      } else if (revealed && /^[1-4]$/.test(event.key)) {
         event.preventDefault();
         void submitReview(Number(event.key));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view, current, celebrate, busy, revealed, submitReview]);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setSelected(null);
-        setCelebrate(false);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [
+    view,
+    current,
+    busy,
+    selected,
+    freeReview,
+    reviewTab,
+    revealed,
+    submitReview,
+  ]);
+  const navigate = (next: View) => {
+    if (busy || wordSaving.current || retryRating !== null) return;
+    stopPronunciation();
+    setView(next);
+    if (next === "review") setReviewTab("due");
+    setFilter("all");
+    setVisibleCount(30);
+    setError("");
+    setPractice(null);
+    setRevealed(false);
+    setAnswer("");
+    setQuery("");
+    setSelected(null);
+  };
   const discover = async () => {
     if (busy) return;
     setBusy(true);
     setError("");
     try {
-      const result = await api<{ words: Word[]; status: Status }>(
-        "/words/daily-new",
-      );
+      const result = await api<DailyWords>("/words/daily-new");
       setNewWords(result.words);
+      setSeenIds(result.seenIds);
       setStatus(result.status);
-      setDiscoveryIndex(0);
+      setFailedWordId(null);
+      const unseen = result.words.findIndex(
+        (word) => !result.seenIds.includes(word.id),
+      );
+      setDiscoveryIndex(unseen < 0 ? 0 : unseen);
       setView("discover");
-      await refresh();
+      setPractice(null);
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusy(false);
     }
   };
-  const navigate = (next: View) => {
-    setView(next);
-    setRevealed(false);
-    setAnswer("");
-    setError("");
-  };
   const logout = async () => {
+    if (busy || wordSaving.current) return;
+    setBusy(true);
     try {
       await api("/auth/logout", {});
+      stopPronunciation();
       setUser(null);
       setStatus(null);
       setStats(null);
       setDue([]);
       setVault([]);
       setNewWords([]);
+      setSeenIds([]);
+      setPractice(null);
+      setSelected(null);
       setView("today");
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
+  const startPractice = (cards: Card[]) => {
+    stopPronunciation();
+    setPractice(cards);
+    setRevealed(false);
+    setAnswer("");
+    setView("review");
+    setSelected(null);
+  };
+  const filteredVault = vault.filter(
+    (card) =>
+      (filter === "all" || card.mastery === filter) &&
+      `${card.word.word} ${card.word.definition} ${card.word.senses?.map((sense) => sense.definition).join(" ") || ""}`
+        .toLowerCase()
+        .includes(query.toLowerCase().trim()),
+  );
+  const alternatives = current
+    ? [...new Set(vault.map((card) => card.word.word))]
+        .filter((word) => word !== current.word.word)
+        .slice(0, 3)
+    : [];
+  const clozeOptions = current
+    ? [...alternatives, current.word.word].sort((a, b) =>
+        a.localeCompare(b, "en"),
+      )
+    : [];
+  const activeMode =
+    mode === "cloze" && !current?.word.examples[0] ? "flashcard" : mode;
+  const navItems = [
+    { view: "today" as View, label: "Oggi", icon: Sparkles },
+    { view: "review" as View, label: "Ripasso", icon: Layers },
+    { view: "vault" as View, label: "Vocabolario", icon: BookOpen },
+  ];
+  const nav = (
+    <>
+      {navItems.map((item) => (
+        <button
+          key={item.view}
+          aria-current={
+            view === item.view || (item.view === "today" && view === "discover")
+              ? "page"
+              : undefined
+          }
+          disabled={busy || savingWord || retryRating !== null}
+          onClick={() => navigate(item.view)}
+        >
+          <item.icon size={19} />
+          <span>{item.label}</span>
+          {item.view === "review" && !!status?.pendingReviews && (
+            <span className="nav-count">{status.pendingReviews}</span>
+          )}
+        </button>
+      ))}
+    </>
+  );
+  const target =
+    status?.availableToday ?? status?.dailyLimit ?? user?.dailyTarget ?? 4;
+  const dailyFinished =
+    !!status && target > 0 && status.acquiredToday >= target;
+  const themeButton = (
+    <button
+      className="icon-button"
+      aria-label={`Passa al tema ${theme === "dark" ? "chiaro" : "scuro"}`}
+      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+    >
+      {theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}
+    </button>
+  );
   if (initializing)
     return (
       <div className="initial-loading">
-        <div className="brand-symbol">
-          <Layers size={28} />
-        </div>
-        <LoaderCircle className="spin" size={22} />
-        <span>Prepariamo le tue parole…</span>
+        <LoaderCircle className="spin" />
+        <span>Caricamento…</span>
       </div>
     );
   if (!user)
     return (
       <>
-        <button
-          className="auth-theme icon-button"
-          aria-label="Cambia tema"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        >
-          {theme === "dark" ? <Sun size={19} /> : <Moon size={19} />}
-        </button>
+        <div className="auth-theme">{themeButton}</div>
         <Auth
           onLogin={(loggedIn) => {
             setLoading(true);
+            setError("");
             setUser(loggedIn);
           }}
         />
       </>
     );
-  const navItems = [
-    { view: "today" as View, icon: Focus, label: "Oggi" },
-    { view: "review" as View, icon: Layers, label: "Ripasso" },
-    { view: "discover" as View, icon: Sparkles, label: "Scopri" },
-    { view: "vault" as View, icon: BookOpen, label: "Vocabolario" },
-  ];
-  const filteredVault = vault.filter(
-    (card) =>
-      (filter === "all" || card.mastery === filter) &&
-      `${card.word.word} ${card.word.definition}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
+  const listing = (
+    <>
+      <div className="vault-tools">
+        <label className="search-field">
+          <Search size={18} />
+          <input
+            aria-label="Cerca nel tuo vocabolario"
+            placeholder="Cerca una parola o un significato"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setVisibleCount(30);
+            }}
+          />
+        </label>
+        {view === "vault" && (
+          <select
+            aria-label="Filtra per padronanza"
+            value={filter}
+            onChange={(event) => {
+              setFilter(event.target.value);
+              setVisibleCount(30);
+            }}
+          >
+            <option value="all">Tutte le parole</option>
+            {Object.entries(masteryLabels).map(([key, label]) => (
+              <option key={key} value={key}>
+                {label}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+      {filteredVault.length ? (
+        <div>
+          <ul className="word-list">
+            {filteredVault.slice(0, visibleCount).map((card) => (
+              <li key={card.id}>
+                <button onClick={() => setSelected(card.word)}>
+                  <span>
+                    <strong lang="en">{card.word.word}</strong>
+                    <span className="list-definition">
+                      {card.word.definition}
+                    </span>
+                  </span>
+                  <span className="list-status">
+                    {masteryLabels[card.mastery]}
+                  </span>
+                  <ArrowRight size={17} />
+                </button>
+              </li>
+            ))}
+          </ul>
+          {visibleCount < filteredVault.length && (
+            <button
+              className="button secondary full load-more"
+              onClick={() => setVisibleCount((count) => count + 30)}
+            >
+              Mostra altre parole ({filteredVault.length - visibleCount})
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="empty-state">
+          <BookOpen size={28} />
+          <h2>
+            {vault.length
+              ? "Nessuna parola trovata"
+              : "Il tuo vocabolario inizia da qui"}
+          </h2>
+          <p>
+            {vault.length
+              ? "Prova con un’altra ricerca."
+              : "Le parole che scopri saranno sempre disponibili qui."}
+          </p>
+          {!vault.length && (
+            <button
+              className="button primary"
+              disabled={busy}
+              onClick={() =>
+                status?.pendingReviews ? navigate("review") : void discover()
+              }
+            >
+              Inizia
+              <ArrowRight size={18} />
+            </button>
+          )}
+        </div>
+      )}
+    </>
   );
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <button className="brand" onClick={() => navigate("today")}>
-          <div className="brand-symbol">
-            <Layers size={21} />
-          </div>
-          lexiq<span className="brand-dot">.</span>
+      <header className="topbar">
+        <button
+          className="brand"
+          disabled={busy || savingWord || retryRating !== null}
+          onClick={() => navigate("today")}
+        >
+          lexiq<span>.</span>
         </button>
-        <span className="nav-caption">IL TUO ALLENAMENTO</span>
-        <nav>
-          {navItems.map((item) => (
-            <button
-              key={item.view}
-              className={`nav-item ${view === item.view ? "active" : ""}`}
-              onClick={() => navigate(item.view)}
-            >
-              <item.icon size={19} />
-              <span>{item.label}</span>
-              {item.view === "review" && !!status?.pendingReviews && (
-                <span className="nav-count">{status.pendingReviews}</span>
-              )}
-            </button>
-          ))}
+        <nav className="desktop-nav" aria-label="Navigazione principale">
+          {nav}
         </nav>
-        <div className="sidebar-bottom">
-          <div className="habit-note">
-            <div className="habit-icon">
-              <Sparkles size={18} />
-            </div>
-            <p>La costanza è un superpotere.</p>
-            <span>Cinque minuti oggi. Un vocabolario più ricco domani.</span>
-          </div>
+        <div className="topbar-actions">
+          {themeButton}
           <button
-            className="account"
+            className="icon-button"
+            disabled={busy || savingWord || retryRating !== null}
+            aria-label="Esci dall’account"
             onClick={() => void logout()}
-            aria-label="Esci"
           >
-            <span className="avatar">{user.name.charAt(0).toUpperCase()}</span>
-            <span>
-              <strong>{user.name}</strong>
-              <small>Continua a crescere</small>
-            </span>
-            <LogOut size={17} />
+            <LogOut size={19} />
           </button>
         </div>
-      </aside>
-      <div className="main-shell">
-        <header className="topbar">
-          <span className="breadcrumb">
-            Il tuo spazio <ChevronRight size={14} />
-            <strong>
-              {navItems.find((item) => item.view === view)?.label}
-            </strong>
-          </span>
-          <div className="topbar-actions">
-            <span className="streak-pill">
-              <Flame size={16} />
-              {status?.streak ?? 0}
-              <span>giorni consecutivi</span>
-            </span>
+      </header>
+      <main className="content">
+        {error && (
+          <div className="error-banner" role="alert">
+            <span>{error}</span>
             <button
               className="icon-button"
-              aria-label={`Passa al tema ${theme === "dark" ? "chiaro" : "scuro"}`}
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              aria-label="Chiudi il messaggio di errore"
+              onClick={() => setError("")}
             >
-              {theme === "dark" ? <Sun size={19} /> : <Moon size={19} />}
-            </button>
-            <button
-              className="mobile-logout icon-button"
-              aria-label="Esci"
-              onClick={() => void logout()}
-            >
-              <LogOut size={18} />
+              <X size={18} />
             </button>
           </div>
-        </header>
-        <main className="content">
-          {error && (
-            <div className="error-banner" role="alert">
-              <span>{error}</span>
-              <button aria-label="Chiudi il messaggio di errore" onClick={() => setError("")}>
-                <X size={17} />
-              </button>
-            </div>
-          )}
-          {loading ? (
-            <div className="loading-panel">
-              <LoaderCircle className="spin" />
-              Caricamento del tuo allenamento…
-            </div>
-          ) : !status ? (
-            <div className="empty-state">
-              <div className="empty-icon">
-                <Focus size={32} />
-              </div>
-              <h2>Riprendiamo il tuo allenamento.</h2>
-              <p>I tuoi progressi sono al sicuro. Al momento non riusciamo a caricarli.</p>
-              <button
-                className="button primary"
-                onClick={() => {
-                  setLoading(true);
-                  setError("");
-                  void refresh()
-                    .catch((err) => setError(err.message))
-                    .finally(() => setLoading(false));
-                }}
-              >
-                Riprova
-                <ArrowRight size={18} />
-              </button>
-            </div>
-          ) : (
-            <>
-              {view === "today" && (
-                <>
-                  <div className="page-heading">
-                    <div>
-                      <span className="eyebrow">
-                        {new Intl.DateTimeFormat("it-IT", {
-                          weekday: "long",
-                          month: "long",
-                          day: "numeric",
-                          timeZone: "UTC",
-                        }).format(today)}{" "}
-                        · UTC
-                      </span>
-                      <h1>Un piccolo progresso, ogni giorno.</h1>
-                      <p>
-                        Ciao, {user.name.split(" ")[0]}. Facciamo in modo che
-                        le parole restino nella tua memoria.
-                      </p>
-                    </div>
-                    <span className="heading-decoration">
-                      <Sparkles size={28} />
+        )}
+        {loading ? (
+          <div className="initial-loading">
+            <LoaderCircle className="spin" />
+            <span>Caricamento del tuo allenamento…</span>
+          </div>
+        ) : !status ? (
+          <div className="empty-state">
+            <h2>Non riusciamo a caricare i tuoi progressi</h2>
+            <button
+              className="button primary"
+              onClick={() => {
+                setLoading(true);
+                void refresh()
+                  .catch((err) => setError(err.message))
+                  .finally(() => setLoading(false));
+              }}
+            >
+              Riprova
+            </button>
+          </div>
+        ) : (
+          <>
+            {view === "today" && (
+              <>
+                <div className="page-heading">
+                  <div>
+                    <p className="muted">
+                      {new Intl.DateTimeFormat("it-IT", {
+                        weekday: "long",
+                        day: "numeric",
+                        month: "long",
+                        timeZone: "UTC",
+                      }).format(new Date(status.day + "T12:00:00Z"))}
+                    </p>
+                    <h1>Ciao, {user.name.split(" ")[0]}.</h1>
+                    <p>Un piccolo passo per il tuo inglese.</p>
+                  </div>
+                  {status.streak > 0 && (
+                    <span className="streak-pill">
+                      <Flame size={17} />
+                      {status.streak}{" "}
+                      {status.streak === 1 ? "giorno" : "giorni"} di costanza
                     </span>
-                  </div>
-                  <section className="today-hero">
-                    <div className="hero-copy">
-                      <span className="hero-label">
-                        <span className="little-dot" />
-                        IL TUO ALLENAMENTO QUOTIDIANO
-                      </span>
-                      <h2>
-                        {status?.pendingReviews
-                          ? "Prima ripassa.\nPoi scopri."
-                          : "La mente è pronta.\nSpazio a nuove parole."}
-                      </h2>
-                      <p>
-                        {status?.pendingReviews
-                          ? `Hai ${status.pendingReviews} parole da ripassare. Ripassale per sbloccare le scoperte di oggi.`
-                          : "Hai completato i ripassi. Scopri quattro parole utili e falle tue."}
-                      </p>
-                      <button
-                        className="button primary"
-                        disabled={busy}
-                        onClick={() =>
-                          status?.pendingReviews
-                            ? navigate("review")
-                            : void discover()
-                        }
-                      >
-                        {busy ? (
-                          <LoaderCircle className="spin" size={17} />
-                        ) : (
-                          <>
-                            {status?.pendingReviews
-                              ? "Inizia il ripasso"
-                              : status?.acquiredToday
-                                ? "Rivedi le parole di oggi"
-                                : "Scopri le parole di oggi"}
-                            <ArrowRight size={18} />
-                          </>
-                        )}
-                      </button>
-                      <span className="hero-meta">
-                        <Focus size={14} />Bastano pochi minuti di concentrazione per fare la
-                        differenza
-                      </span>
-                    </div>
-                    <div className="hero-visual" aria-hidden="true">
-                      <div className="orbit orbit-one" />
-                      <div className="orbit orbit-two" />
-                      <div className="visual-card visual-card-back">
-                        <Layers size={28} />
-                      </div>
-                      <div className="visual-card visual-card-front">
-                        <span>PAROLA DOPO PAROLA</span>
-                        <div className="visual-symbol">
-                          Aa<span>↗</span>
-                        </div>
-                        <div className="visual-line" />
-                        <small>Impara. Ricorda. Ripeti.</small>
-                      </div>
-                      <span className="floating-star">
-                        <Sparkles size={24} />
-                      </span>
-                    </div>
-                  </section>
-                  <div className="stats-grid">
-                    <div className="stat-card">
-                      <div className="stat-label">
-                        <Flame size={17} />
-                        Serie attuale
-                      </div>
-                      <strong>
-                        {stats?.streak ?? 0}
-                        <small>giorni</small>
-                      </strong>
-                      <span>Record: {stats?.longestStreak ?? 0} giorni</span>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-label">
-                        <BookOpen size={17} />
-                        Parole raccolte
-                      </div>
-                      <strong>
-                        {stats?.totalWords ?? 0}
-                        <small>parole</small>
-                      </strong>
-                      <span>Un vocabolario che cresce con te</span>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-label">
-                        <Target size={17} />
-                        Percentuale di ricordo
-                      </div>
-                      <strong>
-                        {stats?.reviewCount
-                          ? `${Math.round(stats.retention)}%`
-                          : "—"}
-                      </strong>
-                      <span>
-                        {stats?.reviewCount
-                          ? `Su ${stats.reviewCount} ripassi`
-                          : "Tutto inizia dal tuo primo ripasso"}
-                      </span>
-                    </div>
-                  </div>
-                  <RetentionChart history={stats?.retentionHistory || []} />
-                  <div className="section-title">
-                    <h2>La tua routine quotidiana</h2>
-                    <span>Una piccola abitudine. Tre semplici passi.</span>
-                  </div>
-                  <div className="loop-grid">
-                    <button
-                      className="loop-card"
-                      onClick={() => navigate("review")}
-                    >
-                      <span className="step-number">01</span>
-                      <div className="loop-icon">
-                        <Layers size={21} />
-                      </div>
-                      <h3>Ripassa e ricorda</h3>
-                      <p>Un breve ripasso delle parole che hai già incontrato.</p>
-                      <span
-                        className={`loop-status ${!status?.pendingReviews ? "complete" : ""}`}
-                      >
-                        {status?.pendingReviews ? (
-                          <>
-                            {status.pendingReviews} parole da ripassare
-                            <ArrowRight size={15} />
-                          </>
-                        ) : (
-                          <>
-                            <Check size={15} />
-                            Ripassi completati
-                          </>
-                        )}
-                      </span>
-                    </button>
-                    <button
-                      className="loop-card"
-                      disabled={!!status?.pendingReviews || busy}
-                      onClick={() => void discover()}
-                    >
-                      <span className="step-number">02</span>
-                      <div className="loop-icon">
-                        <Sparkles size={21} />
-                      </div>
-                      <h3>Scopri nuove parole</h3>
-                      <p>Quattro parole utili per il tuo inglese di ogni giorno.</p>
-                      <span className="loop-status">
-                        {status?.pendingReviews ? (
-                          <>
-                            <LockKeyhole size={14} />
-                            Completa il ripasso per sbloccare
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles size={14} />
-                            Tutto pronto per scoprire
-                            <ArrowRight size={15} />
-                          </>
-                        )}
-                      </span>
-                    </button>
-                    <button
-                      className="loop-card"
-                      onClick={() => navigate("vault")}
-                    >
-                      <span className="step-number">03</span>
-                      <div className="loop-icon">
-                        <BookOpen size={21} />
-                      </div>
-                      <h3>Guarda i tuoi progressi</h3>
-                      <p>
-                        La tua raccolta personale, dal primo incontro alla
-                        piena padronanza.
-                      </p>
-                      <span className="loop-status">
-                        Esplora il tuo vocabolario
-                        <ArrowRight size={15} />
-                      </span>
-                    </button>
-                  </div>
-                  <div className="daily-footnote">
-                    <span className="little-dot" />
-                    Per imparare nel tempo, una parola alla volta.
-                    <span>Il nuovo giorno di allenamento inizia a mezzanotte UTC</span>
-                  </div>
-                </>
-              )}
-              {view === "review" && (
-                <>
-                  <div className="page-heading">
-                    <div>
-                      <span className="eyebrow">
-                        FASE 01 · RIPASSA E RICORDA
-                      </span>
-                      <h1>Il tuo ripasso quotidiano.</h1>
-                      <p>Prenditi un momento per ricordare. Poi scoprirai nuove parole.</p>
-                    </div>
-                    <span className="badge">
-                      {status?.pendingReviews ?? 0} da ripassare
-                    </span>
-                  </div>
-                  {!current ? (
-                    <div className="empty-state">
-                      <div className="empty-icon">
-                        <CheckCheck size={34} />
-                      </div>
-                      <h2>Ripasso completato. Ottimo lavoro.</h2>
-                      <p>
-                        Le parole stanno entrando nella tua memoria. Le scoperte di oggi
-                        sono sbloccate.
-                      </p>
-                      <button
-                        className="button primary"
-                        disabled={busy}
-                        onClick={() => void discover()}
-                      >
-                        Scopri nuove parole
-                        <ArrowRight size={18} />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="review-wrap">
-                      <div className="review-toolbar">
-                        <div className="segmented">
-                          {(["flashcard", "recall", "cloze"] as Mode[]).map(
-                            (item) => (
-                              <button
-                                key={item}
-                                className={mode === item ? "active" : ""}
-                                onClick={() => {
-                                  setMode(item);
-                                  setRevealed(false);
-                                  setAnswer("");
-                                }}
-                              >
-                                {item === "flashcard"
-                                  ? "Schede"
-                                  : item === "recall"
-                                    ? "Scrivi la parola"
-                                    : "Completa la frase"}
-                              </button>
-                            ),
-                          )}
-                        </div>
-                        <span className="muted">
-                          {reviewed} ripassi in questa sessione
-                        </span>
-                      </div>
-                      <article
-                        className={`review-card ${revealed ? "revealed" : ""}`}
-                        key={`${current.id}-${mode}`}
-                        onTouchStart={(event) => {
-                          touchStart.current = event.touches[0].clientX;
-                        }}
-                        onTouchEnd={(event) => {
-                          if (
-                            touchStart.current !== null &&
-                            Math.abs(
-                              event.changedTouches[0].clientX -
-                                touchStart.current,
-                            ) > 65
-                          )
-                            setRevealed(true);
-                          touchStart.current = null;
-                        }}
-                      >
-                        <div className="review-card-top">
-                          <span className="badge">{current.word.level}</span>
-                          <span className="eyebrow">
-                            {revealed
-                              ? "ECCO LA PAROLA"
-                              : "PROVA A RICORDARE"}
-                          </span>
-                          <span className="card-dots">•••</span>
-                        </div>
-                        {revealed ? (
-                          <div className="review-answer">
-                            <WordDetail
-                              word={current.word}
-                              onError={setError}
-                            />
-                            {mode !== "flashcard" && (
-                              <p
-                                className={`answer-feedback ${answer.trim().toLowerCase() === current.word.word.toLowerCase() ? "correct" : ""}`}
-                              >
-                                {answer.trim().toLowerCase() ===
-                                current.word.word.toLowerCase()
-                                  ? "Esatto! Hai ricordato la parola."
-                                  : `La tua risposta: ${answer || "Nessuna risposta inserita"}. Valuta quanto bene hai ricordato la parola.`}
-                              </p>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="review-prompt">
-                            {mode === "flashcard" ? (
-                              <>
-                                <h2>{current.word.word}</h2>
-                                <span className="ipa">{current.word.ipa}</span>
-                                <p>Ricordi il significato di questa parola?</p>
-                                <button
-                                  className="button secondary"
-                                  onClick={() => setRevealed(true)}
-                                >
-                                  Mostra il significato
-                                  <ArrowDown size={16} />
-                                </button>
-                              </>
-                            ) : (
-                              <form
-                                onSubmit={(event) => {
-                                  event.preventDefault();
-                                  setRevealed(true);
-                                }}
-                              >
-                                <span className="eyebrow">
-                                  {mode === "recall"
-                                    ? "QUALE PAROLA SIGNIFICA…"
-                                    : "COMPLETA LA FRASE"}
-                                </span>
-                                <h2 className="recall-definition">
-                                  {mode === "recall"
-                                    ? current.word.definition
-                                    : (
-                                        current.word.examples[0] ||
-                                        current.word.definition
-                                      ).replace(
-                                        new RegExp(
-                                          current.word.word.replace(
-                                            /[.*+?^${}()|[\]\\]/g,
-                                            "\\$&",
-                                          ),
-                                          "ig",
-                                        ),
-                                        "________",
-                                      )}
-                                </h2>
-                                {mode === "cloze" ? (
-                                  <div
-                                    className="cloze-options"
-                                    role="group"
-                                    aria-label="Scegli la parola che completa la frase"
-                                  >
-                                    {clozeOptions.map((option) => (
-                                      <button
-                                        type="button"
-                                        key={option}
-                                        onClick={() => {
-                                          setAnswer(option);
-                                          setRevealed(true);
-                                        }}
-                                      >
-                                        {option}
-                                        <ArrowRight size={15} />
-                                      </button>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <>
-                                    <input
-                                      aria-label="La parola che ricordi"
-                                      value={answer}
-                                      onChange={(event) =>
-                                        setAnswer(event.target.value)
-                                      }
-                                      placeholder="Scrivi la parola…"
-                                      autoComplete="off"
-                                      autoCapitalize="none"
-                                      spellCheck={false}
-                                      autoFocus
-                                    />
-                                    <button
-                                      className="button secondary"
-                                      type="submit"
-                                    >
-                                      Verifica la risposta
-                                      <ArrowRight size={16} />
-                                    </button>
-                                  </>
-                                )}
-                              </form>
-                            )}
-                          </div>
-                        )}
-                      </article>
-                      {revealed ? (
-                        <div className="rating-section">
-                          <p>Quanto bene hai ricordato?</p>
-                          <div className="rating-grid">
-                            {[
-                              {
-                                name: "Da ripetere",
-                                note: "Ripassa ancora",
-                                style: "again",
-                              },
-                              {
-                                name: "Difficile",
-                                note: "Serve un altro ripasso",
-                                style: "hard",
-                              },
-                              { name: "Bene", note: "La ricordavo", style: "good" },
-                              {
-                                name: "Facile",
-                                note: "Ricordata subito",
-                                style: "easy",
-                              },
-                            ].map((rating, index) => (
-                              <button
-                                className={`rating ${rating.style}`}
-                                disabled={
-                                  busy ||
-                                  (retryRating !== null &&
-                                    retryRating !== index + 1)
-                                }
-                                key={rating.name}
-                                onClick={() => void submitReview(index + 1)}
-                              >
-                                <kbd>{index + 1}</kbd>
-                                <strong>{rating.name}</strong>
-                                <small>{rating.note}</small>
-                              </button>
-                            ))}
-                          </div>
-                          <span className="muted rating-note">
-                            Con «Da ripetere» e «Difficile» la parola resta nei ripassi di oggi.
-                          </span>
-                        </div>
-                      ) : (
-                        <p className="keyboard-hint">
-                          <kbd>Spazio</kbd> per mostrare la risposta<span>·</span>Scorri la scheda
-                          sul telefono
-                        </p>
-                      )}
-                    </div>
                   )}
-                </>
-              )}
-              {view === "discover" && (
-                <>
-                  <div className="page-heading">
-                    <div>
-                      <span className="eyebrow">
-                        FASE 02 · SCOPERTE QUOTIDIANE
-                      </span>
-                      <h1>Poche parole. Nuove possibilità.</h1>
-                      <p>Ascolta, leggi e fai spazio a nuove conoscenze.</p>
-                    </div>
+                </div>
+                <section className="daily-panel panel">
+                  <div className="daily-progress">
+                    <span>
+                      <strong>{status.pendingReviews}</strong> da ripassare
+                    </span>
+                    <span>
+                      <strong>
+                        {status.acquiredToday} / {status.dailyLimit}
+                      </strong>{" "}
+                      nuove parole
+                    </span>
                   </div>
-                  {status?.pendingReviews ? (
-                    <div className="empty-state">
-                      <div className="empty-icon">
-                        <LockKeyhole size={32} />
-                      </div>
-                      <h2>Prima ripassa, poi scopri.</h2>
-                      <p>
-                        Ripassa le {status.pendingReviews} parole in attesa per
-                        sbloccare le scoperte di oggi.
-                      </p>
-                      <button
-                        className="button primary"
-                        onClick={() => navigate("review")}
-                      >
-                        Inizia il ripasso
-                        <ArrowRight size={18} />
-                      </button>
-                    </div>
-                  ) : !newWords.length ? (
-                    <div className="empty-state">
-                      <div className="empty-icon">
-                        <Sparkles size={34} />
-                      </div>
-                      <h2>Le tue prossime parole ti aspettano.</h2>
-                      <p>
-                        Quattro parole utili nella vita quotidiana. Verranno aggiunte al tuo vocabolario
-                        e saranno pronte per il ripasso di domani.
-                      </p>
-                      <button
-                        className="button primary"
-                        disabled={busy}
-                        onClick={() => void discover()}
-                      >
-                        {busy ? (
-                          <LoaderCircle className="spin" size={18} />
-                        ) : (
-                          <>
-                            Sblocca le parole di oggi
-                            <ArrowRight size={18} />
-                          </>
-                        )}
-                      </button>
-                    </div>
+                  <h2>
+                    {status.pendingReviews
+                      ? "Riprendiamo le parole che conosci."
+                      : dailyFinished
+                        ? "Obiettivo raggiunto per oggi."
+                        : "Scopri le parole di oggi."}
+                  </h2>
+                  <p>
+                    {status.pendingReviews
+                      ? "Un breve ripasso, poi spazio a nuove parole."
+                      : dailyFinished
+                        ? "Puoi rivederle liberamente quando vuoi."
+                        : "Una parola alla volta, al tuo ritmo."}
+                  </p>
+                  <button
+                    className="button primary"
+                    disabled={busy}
+                    onClick={() =>
+                      status.pendingReviews
+                        ? navigate("review")
+                        : dailyFinished
+                          ? startPractice(vault)
+                          : void discover()
+                    }
+                  >
+                    {busy ? (
+                      <LoaderCircle className="spin" size={18} />
+                    ) : status.pendingReviews ? (
+                      "Inizia il ripasso"
+                    ) : dailyFinished ? (
+                      "Ripassa liberamente"
+                    ) : status.acquiredToday ? (
+                      "Continua"
+                    ) : (
+                      "Inizia"
+                    )}
+                    <ArrowRight size={18} />
+                  </button>
+                </section>
+                <details
+                  className="progress-details"
+                  onToggle={(event) => {
+                    if (event.currentTarget.open && !stats)
+                      void api<Stats>("/stats")
+                        .then(setStats)
+                        .catch((err) => setError(err.message));
+                  }}
+                >
+                  <summary>Vedi progressi</summary>
+                  {stats ? (
+                    <Progress stats={stats} status={status} />
                   ) : (
-                    <div className="discovery-wrap">
-                      <div className="discovery-progress">
-                        {newWords.map((word, index) => (
-                          <button
-                            key={word.id}
-                            aria-label={`Mostra la parola ${index + 1}: ${word.word}`}
-                            className={index === discoveryIndex ? "active" : ""}
-                            onClick={() => setDiscoveryIndex(index)}
-                          />
-                        ))}
-                        <span>
-                          {discoveryIndex + 1} di {newWords.length}
-                        </span>
-                      </div>
-                      <article
-                        className="discovery-card"
-                        key={newWords[discoveryIndex].id}
-                      >
-                        <div className="discovery-card-label">
-                          <Sparkles size={16} />
-                          LA SCOPERTA DI OGGI
-                          <span>
-                            <Check size={14} />
-                            Salvata nel tuo vocabolario
-                          </span>
-                        </div>
-                        <WordDetail
-                          word={newWords[discoveryIndex]}
-                          onError={setError}
-                        />
-                      </article>
-                      <div className="discovery-nav">
+                    <p className="muted">Caricamento dei progressi…</p>
+                  )}
+                </details>
+              </>
+            )}
+            {view === "review" && (
+              <>
+                <div className="page-heading">
+                  <div>
+                    <h1>Ripasso</h1>
+                    <p>
+                      {freeReview
+                        ? "Allenati senza modificare il programma dei ripassi."
+                        : "Ricorda le parole, un passo alla volta."}
+                    </p>
+                  </div>
+                  {freeReview && (
+                    <button
+                      className="text-button"
+                      onClick={() => {
+                        setPractice(null);
+                        setReviewTab("all");
+                      }}
+                    >
+                      Termina
+                    </button>
+                  )}
+                </div>
+                {!freeReview && (
+                  <div className="tabs" aria-label="Tipo di ripasso">
+                    <button
+                      aria-pressed={reviewTab === "due"}
+                      onClick={() => {
+                        setReviewTab("due");
+                        setQuery("");
+                        setFilter("all");
+                      }}
+                    >
+                      Da ripassare <span>{due.length}</span>
+                    </button>
+                    <button
+                      aria-pressed={reviewTab === "all"}
+                      disabled={busy || retryRating !== null}
+                      onClick={() => {
+                        setReviewTab("all");
+                        setQuery("");
+                        setFilter("all");
+                      }}
+                    >
+                      Tutte le parole <span>{vault.length}</span>
+                    </button>
+                  </div>
+                )}
+                {!freeReview && reviewTab === "all" ? (
+                  <>
+                    {vault.length > 0 && (
+                      <div className="practice-heading">
+                        <p className="muted">
+                          Anche le parole appena scoperte sono già qui.
+                        </p>
                         <button
                           className="button secondary"
-                          disabled={discoveryIndex === 0}
-                          onClick={() =>
-                            setDiscoveryIndex((index) => index - 1)
-                          }
+                          onClick={() => startPractice(filteredVault)}
+                          disabled={!filteredVault.length}
                         >
-                          <ArrowLeft size={17} />
-                          Precedente
-                        </button>
-                        <button
-                          className="button primary"
-                          onClick={() =>
-                            discoveryIndex < newWords.length - 1
-                              ? setDiscoveryIndex((index) => index + 1)
-                              : setCelebrate(true)
-                          }
-                        >
-                          {discoveryIndex < newWords.length - 1
-                            ? "Prossima parola"
-                            : "Concludi per oggi"}
-                          <ArrowRight size={17} />
+                          Ripassa {query ? "i risultati" : "tutte"}
                         </button>
                       </div>
-                      <p className="keyboard-hint">
-                        <Check size={15} />
-                        Queste parole entreranno nei ripassi di domani.
-                      </p>
+                    )}
+                    {listing}
+                  </>
+                ) : !current ? (
+                  <div className="empty-state">
+                    <div className="success-icon">
+                      <Check size={28} />
                     </div>
-                  )}
-                </>
-              )}
-              {view === "vault" && (
-                <>
-                  <div className="page-heading">
-                    <div>
-                      <span className="eyebrow">
-                        FASE 03 · IL TUO VOCABOLARIO CRESCE
+                    <h2>
+                      {freeReview
+                        ? "Ripasso libero completato"
+                        : "Hai completato i ripassi"}
+                    </h2>
+                    <p>
+                      {freeReview
+                        ? "Puoi tornare quando vuoi."
+                        : dailyFinished
+                          ? "Hai già raggiunto l’obiettivo di oggi."
+                          : "Ora puoi scoprire nuove parole."}
+                    </p>
+                    <button
+                      className="button primary"
+                      disabled={busy}
+                      onClick={() => {
+                        if (freeReview || dailyFinished) {
+                          navigate("today");
+                        } else void discover();
+                      }}
+                    >
+                      {freeReview || dailyFinished
+                        ? "Torna a oggi"
+                        : "Scopri nuove parole"}
+                      <ArrowRight size={18} />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="study-wrap">
+                    <div className="study-toolbar">
+                      <span className="muted">
+                        {freeReview
+                          ? `${practice!.length} nel ripasso libero`
+                          : `${due.length} da ripassare`}
                       </span>
-                      <h1>Ogni parola ha il suo posto.</h1>
-                      <p>
-                        Dal primo incontro a un ricordo naturale. Questo è il tuo
-                        vocabolario.
-                      </p>
-                    </div>
-                    <span className="badge">{vault.length} parole</span>
-                  </div>
-                  <div className="vault-tools">
-                    <label className="search-field">
-                      <Search size={18} />
-                      <input
-                        aria-label="Cerca nel tuo vocabolario"
-                        placeholder="Cerca una parola o un significato…"
-                        value={query}
-                        onChange={(event) => setQuery(event.target.value)}
-                      />
-                    </label>
-                    <div className="segmented vault-filters">
-                      {["all", "learning", "familiar", "mastered"].map(
-                        (item) => (
-                          <button
-                            key={item}
-                            className={filter === item ? "active" : ""}
-                            onClick={() => setFilter(item)}
-                          >
-                            {masteryLabels[item]}
-                            <span>
-                              {item === "all"
-                                ? vault.length
-                                : vault.filter((card) => card.mastery === item)
-                                    .length}
-                            </span>
-                          </button>
-                        ),
-                      )}
-                    </div>
-                  </div>
-                  {filteredVault.length ? (
-                    <div className="vault-results">
-                      <div className="vault-table-wrap">
-                        <table className="vault-table">
-                          <thead>
-                            <tr>
-                              <th>Parola</th>
-                              <th>Significato</th>
-                              <th>Livello</th>
-                              <th>Padronanza</th>
-                              <th>
-                                <span className="sr-only">Dettagli</span>
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredVault.map((card) => (
-                              <tr key={card.id}>
-                                <td>
-                                  <button
-                                    className="vault-word-button"
-                                    onClick={() => setSelected(card.word)}
-                                  >
-                                    {card.word.word}
-                                    <span className="ipa">{card.word.ipa}</span>
-                                  </button>
-                                </td>
-                                <td className="table-definition">
-                                  {card.word.definition}
-                                </td>
-                                <td>
-                                  <span className="badge">
-                                    {card.word.level}
-                                  </span>
-                                </td>
-                                <td>
-                                  <span className={`mastery ${card.mastery}`}>
-                                    <span />
-                                    {masteryLabels[card.mastery]}
-                                  </span>
-                                </td>
-                                <td>
-                                  <button
-                                    className="icon-button"
-                                    aria-label={`Mostra il significato di ${card.word.word}`}
-                                    onClick={() => setSelected(card.word)}
-                                  >
-                                    <ArrowRight size={17} />
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                      <div className="vault-grid">
-                        {filteredVault.map((card) => (
-                          <button
-                            className="vault-card"
-                            key={card.id}
-                            onClick={() => setSelected(card.word)}
-                          >
-                            <div className="vault-card-top">
-                              <span className="badge">{card.word.level}</span>
-                              <span className={`mastery ${card.mastery}`}>
-                                <span />
-                                {masteryLabels[card.mastery]}
-                              </span>
-                            </div>
-                            <h2>{card.word.word}</h2>
-                            <span className="ipa">{card.word.ipa}</span>
-                            <p>{card.word.definition}</p>
-                            <div className="vault-card-footer">
-                              <span>{card.word.partOfSpeech}</span>
-                              <ArrowRight size={17} />
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="empty-state">
-                      <div className="empty-icon">
-                        <BookOpen size={32} />
-                      </div>
-                      <h2>
-                        {vault.length
-                          ? "Nessuna parola trovata."
-                          : "Una raccolta inizia con una parola."}
-                      </h2>
-                      <p>
-                        {vault.length
-                          ? "Prova un’altra ricerca o un altro filtro di padronanza."
-                          : "Scopri le parole di oggi per iniziare il tuo vocabolario personale."}
-                      </p>
-                      {!vault.length && (
-                        <button
-                          className="button primary"
-                          onClick={() => navigate("discover")}
+                      <label>
+                        Modalità
+                        <select
+                          aria-label="Modalità di esercizio"
+                          value={activeMode}
+                          disabled={busy || retryRating !== null}
+                          onChange={(event) => {
+                            setMode(event.target.value as Mode);
+                            setRevealed(false);
+                            setAnswer("");
+                          }}
                         >
-                          Scopri parole
-                          <ArrowRight size={17} />
-                        </button>
-                      )}
+                          {Object.entries(modeLabels)
+                            .filter(
+                              ([key]) =>
+                                key !== "cloze" ||
+                                current.word.examples.length > 0,
+                            )
+                            .map(([key, label]) => (
+                              <option value={key} key={key}>
+                                {label}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
                     </div>
-                  )}
-                </>
-              )}
-            </>
-          )}
-        </main>
-      </div>
-      <nav className="mobile-nav">
-        {navItems.map((item) => (
-          <button
-            key={item.view}
-            className={view === item.view ? "active" : ""}
-            onClick={() => navigate(item.view)}
-          >
-            <item.icon size={21} />
-            <span>{item.label}</span>
-          </button>
-        ))}
+                    <article
+                      className="study-card panel"
+                      key={`${current.id}-${activeMode}`}
+                      onTouchStart={(event) => {
+                        touchStart.current = event.touches[0].clientX;
+                      }}
+                      onTouchEnd={(event) => {
+                        if (
+                          touchStart.current !== null &&
+                          Math.abs(
+                            event.changedTouches[0].clientX -
+                              touchStart.current,
+                          ) > 65
+                        )
+                          setRevealed(true);
+                        touchStart.current = null;
+                      }}
+                    >
+                      {revealed ? (
+                        <>
+                          <WordDetail word={current.word} onError={setError} />
+                          {activeMode !== "flashcard" && (
+                            <p className="answer-feedback" role="status">
+                              {answer.trim().toLowerCase() ===
+                              current.word.word.toLowerCase()
+                                ? "Esatto!"
+                                : `La tua risposta: ${answer || "nessuna risposta"}.`}
+                            </p>
+                          )}
+                        </>
+                      ) : activeMode === "flashcard" ? (
+                        <div className="review-prompt">
+                          <h2 lang="en">{current.word.word}</h2>
+                          <p>Ricordi il significato?</p>
+                          <button
+                            className="button secondary"
+                            onClick={() => setRevealed(true)}
+                          >
+                            Mostra la risposta
+                            <ArrowDown size={17} />
+                          </button>
+                        </div>
+                      ) : (
+                        <form
+                          className="review-prompt"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            setRevealed(true);
+                          }}
+                        >
+                          <p className="muted">
+                            {activeMode === "recall"
+                              ? "Quale parola significa…"
+                              : "Completa la frase"}
+                          </p>
+                          <h2
+                            className="recall-definition"
+                            lang={activeMode === "cloze" ? "en" : "it"}
+                          >
+                            {activeMode === "recall"
+                              ? current.word.definition
+                              : current.word.examples[0].replace(
+                                  new RegExp(
+                                    current.word.word.replace(
+                                      /[.*+?^${}()|[\]\\]/g,
+                                      "\\$&",
+                                    ),
+                                    "ig",
+                                  ),
+                                  "________",
+                                )}
+                          </h2>
+                          {activeMode === "cloze" ? (
+                            <div
+                              className="cloze-options"
+                              role="group"
+                              aria-label="Scegli la parola che completa la frase"
+                            >
+                              {clozeOptions.map((option) => (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  lang="en"
+                                  onClick={() => {
+                                    setAnswer(option);
+                                    setRevealed(true);
+                                  }}
+                                >
+                                  {option}
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <>
+                              <input
+                                aria-label="La parola che ricordi"
+                                placeholder="Scrivi la parola inglese"
+                                value={answer}
+                                onChange={(event) =>
+                                  setAnswer(event.target.value)
+                                }
+                                autoComplete="off"
+                                autoCapitalize="none"
+                                spellCheck={false}
+                              />
+                              <button
+                                className="button secondary"
+                                type="submit"
+                              >
+                                Verifica
+                              </button>
+                            </>
+                          )}
+                        </form>
+                      )}
+                    </article>
+                    {revealed ? (
+                      <div className="rating-section">
+                        <p>
+                          {freeReview
+                            ? "Passa alla prossima parola"
+                            : "Quanto bene hai ricordato?"}
+                        </p>
+                        {freeReview ? (
+                          <button
+                            className="button primary full"
+                            onClick={() => void submitReview(3)}
+                          >
+                            Prossima parola
+                            <ArrowRight size={18} />
+                          </button>
+                        ) : (
+                          <>
+                            <div className="rating-grid">
+                              {[
+                                "Da ripetere",
+                                "Difficile",
+                                "Bene",
+                                "Facile",
+                              ].map((label, index) => (
+                                <button
+                                  key={label}
+                                  className={`rating rating-${index}`}
+                                  disabled={
+                                    busy ||
+                                    (retryRating !== null &&
+                                      retryRating !== index + 1)
+                                  }
+                                  onClick={() => void submitReview(index + 1)}
+                                >
+                                  <kbd>{index + 1}</kbd>
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                            <p className="muted">
+                              Con «Da ripetere» e «Difficile» la parola resta
+                              nei ripassi di oggi.
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="keyboard-hint">
+                        <kbd>Spazio</kbd> per mostrare la risposta
+                      </p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+            {view === "discover" && (
+              <>
+                <div className="page-heading">
+                  <div>
+                    <button
+                      className="back-button"
+                      disabled={savingWord}
+                      onClick={() => navigate("today")}
+                    >
+                      <ArrowLeft size={16} />
+                      Oggi
+                    </button>
+                    <h1>Nuove parole</h1>
+                  </div>
+                  <span className="muted">
+                    {status.acquiredToday} / {status.dailyLimit} viste oggi
+                  </span>
+                </div>
+                {!newWords.length ? (
+                  <div className="empty-state">
+                    <BookOpen size={28} />
+                    <h2>Hai esplorato tutte le parole disponibili</h2>
+                    <p>Puoi continuare a ripassare il tuo vocabolario.</p>
+                    <button
+                      className="button primary"
+                      onClick={() => {
+                        navigate("review");
+                        setReviewTab("all");
+                      }}
+                    >
+                      Rivedi le tue parole
+                    </button>
+                  </div>
+                ) : (
+                  <div className="study-wrap">
+                    <div className="study-toolbar">
+                      <span className="muted">
+                        Parola {discoveryIndex + 1} di {newWords.length}
+                      </span>
+                      <span className="save-status" role="status">
+                        {seenIds.includes(newWords[discoveryIndex].id) ? (
+                          <>
+                            <Check size={15} />
+                            Disponibile nel ripasso
+                          </>
+                        ) : savingWord ? (
+                          <>
+                            <LoaderCircle className="spin" size={15} />
+                            Salvataggio…
+                          </>
+                        ) : (
+                          <button
+                            className="text-button"
+                            onClick={() => {
+                              setError("");
+                              setFailedWordId(null);
+                              setSaveAttempt((value) => value + 1);
+                            }}
+                          >
+                            Riprova il salvataggio
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                    <article
+                      className="study-card panel"
+                      key={newWords[discoveryIndex].id}
+                    >
+                      <WordDetail
+                        word={newWords[discoveryIndex]}
+                        onError={setError}
+                      />
+                    </article>
+                    <div className="discovery-nav">
+                      <button
+                        className="button secondary"
+                        disabled={
+                          discoveryIndex === 0 ||
+                          savingWord ||
+                          !seenIds.includes(newWords[discoveryIndex].id)
+                        }
+                        onClick={() => setDiscoveryIndex((index) => index - 1)}
+                      >
+                        <ArrowLeft size={17} />
+                        Precedente
+                      </button>
+                      <button
+                        className="button primary"
+                        disabled={
+                          savingWord ||
+                          !seenIds.includes(newWords[discoveryIndex].id)
+                        }
+                        onClick={() => {
+                          if (discoveryIndex < newWords.length - 1)
+                            setDiscoveryIndex((index) => index + 1);
+                          else navigate("today");
+                        }}
+                      >
+                        {discoveryIndex < newWords.length - 1
+                          ? "Prossima parola"
+                          : "Concludi"}
+                        <ArrowRight size={17} />
+                      </button>
+                    </div>
+                    <p className="keyboard-hint">
+                      Puoi rivedere subito ogni parola in Ripasso → Tutte le
+                      parole.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+            {view === "vault" && (
+              <>
+                <div className="page-heading">
+                  <div>
+                    <h1>Il tuo vocabolario</h1>
+                    <p>
+                      {vault.length}{" "}
+                      {vault.length === 1
+                        ? "parola raccolta"
+                        : "parole raccolte"}
+                      , sempre a disposizione.
+                    </p>
+                  </div>
+                </div>
+                {listing}
+              </>
+            )}
+          </>
+        )}
+      </main>
+      <nav className="mobile-nav" aria-label="Navigazione principale">
+        {nav}
       </nav>
       {selected && (
-        <div className="modal-backdrop" onClick={() => setSelected(null)}>
-          <section
-            className="definition-sheet"
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Significato di ${selected.word}`}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="sheet-handle" />
+        <dialog
+          className="definition-dialog"
+          onCancel={() => setSelected(null)}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setSelected(null);
+          }}
+        >
+          <div className="dialog-content">
             <button
-              className="sheet-close icon-button"
+              className="dialog-close icon-button"
               aria-label="Chiudi il significato"
               onClick={() => setSelected(null)}
             >
-              <X size={20} />
+              <X size={21} />
             </button>
             <WordDetail word={selected} onError={setError} />
-          </section>
-        </div>
-      )}
-      {celebrate && (
-        <div className="modal-backdrop" onClick={() => setCelebrate(false)}>
-          <section
-            className="celebration-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="celebration-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="confetti" aria-hidden="true">
-              {Array.from({ length: 20 }, (_, index) => (
-                <i
-                  key={index}
-                  style={{ "--i": index } as React.CSSProperties}
-                />
-              ))}
-            </div>
+            {error && (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            )}
             <button
-              className="sheet-close icon-button"
-              aria-label="Chiudi la celebrazione"
-              onClick={() => setCelebrate(false)}
-            >
-              <X size={20} />
-            </button>
-            <div className="celebration-icon">
-              <Trophy size={38} />
-            </div>
-            <span className="eyebrow">UN PICCOLO TRAGUARDO DA RICORDARE</span>
-            <h2 id="celebration-title">Oggi hai fatto un passo avanti.</h2>
-            <p>
-              Oggi hai dedicato del tempo alle tue parole.
-              <br />
-              È così che nascono conoscenze durature.
-            </p>
-            <div className="celebration-streak">
-              <Flame size={23} />
-              <strong>{status?.streak ?? 0}</strong>
-              <span>giorni consecutivi</span>
-            </div>
-            <button
-              className="button primary full"
+              className="button secondary full"
               onClick={() => {
-                setCelebrate(false);
-                if (!newWords.length) void discover();
-                else navigate("vault");
+                const card = vault.find((item) => item.word.id === selected.id);
+                if (card) startPractice([card]);
               }}
             >
-              {newWords.length
-                ? "Esplora il tuo vocabolario"
-                : "Scopri le nuove parole di oggi"}
-              <ArrowRight size={18} />
+              Ripassa questa parola
+              <ArrowRight size={17} />
             </button>
-            <button
-              className="text-button"
-              onClick={() => {
-                setCelebrate(false);
-                navigate("today");
-              }}
-            >
-              Torna a oggi
-            </button>
-          </section>
-        </div>
+          </div>
+        </dialog>
       )}
     </div>
   );

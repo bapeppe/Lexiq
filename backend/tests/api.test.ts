@@ -48,10 +48,16 @@ test('authenticated daily habit API integrates with MongoDB', { timeout: 60000 }
   }
   await t.test('authentication validates input and uses private cookie session', async () => {
     assert.equal((await request('/api/daily/status')).response.status, 401);
-    assert.equal((await request('/api/auth/signup', { name: 'Ada', email: 'bad', password: 'short' })).response.status, 400);
+    const invalid = await request('/api/auth/signup', { name: 'Ada', email: 'bad', password: 'short' });
+    assert.equal(invalid.response.status, 400);
+    assert.equal(invalid.data.error.message, 'Controlla i dati inseriti.');
+    assert.ok(invalid.data.error.fields.every((field: any) => !field.message.includes('Too small')));
+    for (const target of [0, 21, 2.5, '5']) {
+      assert.equal((await request('/api/auth/signup', { name: 'Ada', email: 'ada@example.com', password: 'correct horse battery', dailyTarget: target })).response.status, 400);
+    }
     const signup = await request('/api/auth/signup', { name: 'Ada', email: 'ADA@example.com', password: 'correct horse battery' });
     assert.equal(signup.response.status, 201); assert.equal(signup.data.user.email, 'ada@example.com');
-    assert.equal(signup.data.user.passwordHash, undefined);
+    assert.equal(signup.data.user.passwordHash, undefined); assert.equal(signup.data.user.dailyTarget, 4);
     const setCookie = signup.response.headers.get('set-cookie')!;
     assert.match(setCookie, /^lexiq_session=/);
     assert.match(setCookie, /HttpOnly/); assert.match(setCookie, /SameSite=Lax/);
@@ -66,12 +72,27 @@ test('authenticated daily habit API integrates with MongoDB', { timeout: 60000 }
       assert.equal(result.response.headers.get('access-control-allow-origin'), allowed);
     }
   });
-  await t.test('daily acquisition is persisted, bounded, and concurrency-safe', async () => {
+  await t.test('daily selection is stable and only seen words are acquired', async () => {
     const results = await Promise.all(Array.from({ length: 5 }, () => request('/api/words/daily-new')));
     for (const result of results) { assert.equal(result.response.status, 200); assert.equal(result.data.words.length, 4); }
     assert.deepEqual(results[0]!.data.words.map((word: any) => word.id), results[4]!.data.words.map((word: any) => word.id));
     const status = (await request('/api/daily/status')).data;
-    assert.equal(status.pendingReviews, 0); assert.equal(status.acquiredToday, 4); assert.equal(status.streak, 1);
+    assert.equal(status.pendingReviews, 0); assert.equal(status.acquiredToday, 0); assert.equal(status.streak, 0);
+    assert.equal(status.completedToday, false); assert.equal(status.dailyLimit, 4);
+    assert.equal((await request('/api/vault')).data.cards.length, 0);
+    const selected = results[0]!.data.words;
+    const outsider = await Word.findOne({ _id: { $nin: selected.map((word: any) => word.id) } });
+    assert.equal((await request('/api/words/seen', { wordId: String(outsider!._id) })).response.status, 403);
+    const viewed = await Promise.all(Array.from({ length: 8 }, () => request('/api/words/seen', { wordId: selected[0].id })));
+    for (const result of viewed) { assert.equal(result.response.status, 200); assert.equal(result.data.status.acquiredToday, 1); }
+    assert.equal((await request('/api/vault')).data.cards.length, 1);
+    assert.equal((await request('/api/reviews/due')).data.cards.length, 0);
+    assert.equal((await request('/api/daily/status')).data.streak, 0);
+    const resumed = (await request('/api/words/daily-new')).data;
+    assert.deepEqual(resumed.seenIds, [selected[0].id]);
+    for (const word of selected.slice(1)) await request('/api/words/seen', { wordId: word.id });
+    const completed = (await request('/api/daily/status')).data;
+    assert.equal(completed.acquiredToday, 4); assert.equal(completed.streak, 1); assert.equal(completed.completedToday, true);
     assert.equal((await request('/api/vault')).data.cards.length, 4);
   });
   let cards: any[] = [];
@@ -127,7 +148,39 @@ test('authenticated daily habit API integrates with MongoDB', { timeout: 60000 }
     const user = await User.findOne({ email: 'ada@example.com' });
     await Streak.updateOne({ userId: user!._id }, { $set: { currentStreak: 7, longestStreak: 9, lastCompletedDay: utcDay(new Date(Date.now() - 3 * 86400000)) } });
     assert.equal((await request('/api/daily/status')).data.streak, 0);
-    const status = (await request('/api/words/daily-new')).data.status;
+    const selection = (await request('/api/words/daily-new')).data;
+    const status = (await request('/api/words/seen', { wordId: selection.words[0].id })).data.status;
     assert.equal(status.streak, 1); assert.equal(status.longestStreak, 9);
   });
+  await t.test('custom daily targets persist and viewing never exceeds the reserved quota', async () => {
+    for (const target of [1, 5, 20]) {
+      const account = await request('/api/auth/signup', { name: 'Target', email: `target${target}@example.com`, password: 'correct horse battery', dailyTarget: target }, '');
+      assert.equal(account.response.status, 201);
+      const session = account.response.headers.get('set-cookie')!.split(';')[0]!;
+      assert.equal((await request('/api/auth/me', undefined, session)).data.user.dailyTarget, target);
+      const selection = (await request('/api/words/daily-new', undefined, session)).data;
+      assert.equal(selection.words.length, target); assert.equal(selection.status.dailyLimit, target);
+      const views = await Promise.all(selection.words.flatMap((word: any) => Array.from({ length: 3 }, () => request('/api/words/seen', { wordId: word.id }, session))));
+      for (const result of views) assert.equal(result.response.status, 200);
+      const status = (await request('/api/daily/status', undefined, session)).data;
+      assert.equal(status.acquiredToday, target); assert.equal(status.streak, 1);
+      assert.equal((await request('/api/vault', undefined, session)).data.cards.length, target);
+      assert.equal((await request('/api/reviews/due', undefined, session)).data.cards.length, 0);
+      const repeated = (await request('/api/words/daily-new', undefined, session)).data;
+      assert.deepEqual(repeated.words.map((word: any) => word.id), selection.words.map((word: any) => word.id));
+      const card = (await request('/api/vault', undefined, session)).data.cards[0];
+      assert.equal((await request('/api/reviews/submit', { progressId: card.id, rating: 3, submissionId: randomUUID() }, session)).response.status, 409);
+      assert.equal((await request('/api/stats', undefined, session)).data.reviewCount, 0);
+    }
+  });
+  await t.test('catalog is local, attributed and repeated imports preserve editorial changes', async () => {
+    assert.ok(await Word.countDocuments() > 20000);
+    const apple = await Word.findOne({ term: 'apple' });
+    assert.ok(apple); assert.equal(apple.source, 'wiktionary'); assert.equal(apple.definition, 'mela');
+    assert.equal(apple.level, undefined); assert.match(apple.audioUrl!, /^https:\/\/upload.wikimedia.org\//);
+    await Word.updateOne({ _id: apple._id }, { $set: { definition: 'Mela: frutto del melo.' } });
+    await seedWords();
+    assert.equal((await Word.findById(apple._id))!.definition, 'Mela: frutto del melo.');
+  });
+
 });

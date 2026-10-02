@@ -1,6 +1,6 @@
 # Lexiq
 
-A daily English vocabulary habit: review what is due, discover four new words, and grow a personal word vault.
+Un’app per italiani che imparano l’inglese: ripassa, scopri da 1 a 20 nuove parole al giorno e rivedi il tuo vocabolario quando vuoi.
 
 ## Native development on Mac
 
@@ -49,7 +49,7 @@ Daily boundaries are UTC. Reviews due through the end of the current UTC day mus
 
 Users own indexed vocabulary progress. Unique `(userId, wordId)` indexes prevent duplicate cards; `(userId, nextReviewDate)` supports review queries. Mastery is Learning, Familiar, or Mastered based on successful repetitions and interval. Streak updates are atomic and increment once per UTC day. Review receipts and durable submission identifiers prevent duplicate grading when requests are retried.
 
-The catalog contains 56 B1–C1 English words with British IPA, definitions, context, and collocations. Startup seeds the catalog with upserts; `npm run seed` can also seed it explicitly. Neither operation deletes progress or database collections. Daily packs persist four words, or fewer when the catalog is exhausted. Speech pronunciation uses the browser's Web Speech API.
+Il catalogo include 56 voci editoriali e oltre 20.000 voci del Wikizionario con significati italiani. Il numero di nuove parole dipende dall’obiettivo scelto alla registrazione. La selezione viene riservata al primo accesso e ciascuna parola viene acquisita quando è mostrata. Fonti, aggiornamento del catalogo e pronuncia sono descritti nelle sezioni seguenti.
 
 ## API
 
@@ -72,3 +72,44 @@ Space reveals flashcards; 1–4 grade them. Typing and multiple-choice cloze mod
 `npm test` in `backend` runs pure SRS tests and real MongoDB integration tests. Supply a local `mongod` executable, or `MONGO_TEST_URI` pointing to a test server. The suite selects a generated database name and drops only that test database. It verifies authentication, origins, acquisition races, queue locking, repeat recall, duplicate/racing submissions, ownership, logout, and streak transitions.
 
 Every checkpoint is built before committing and pushing to `main`, because pushes synchronize the remote Portainer stacks. Both services use `pull_policy: build` so Compose rebuilds their source even when an older image is cached ([Compose reference](https://docs.docker.com/reference/compose-file/services/#pull_policy)). Dockerfiles and Compose files are reviewed statically on Mac; runtime container checks belong on the remote server.
+
+## Obiettivo e parole viste
+
+Durante la registrazione si sceglie un obiettivo tra 1 e 20 nuove parole al giorno.
+Gli account esistenti mantengono il valore salvato (quattro, in assenza di una
+scelta). Il server riserva una selezione giornaliera stabile, ma acquisisce una
+parola soltanto quando il frontend comunica che è stata mostrata. Ricaricare o
+aprire più sessioni non aumenta il limite e non duplica i progressi.
+
+Le parole viste sono subito disponibili in **Ripasso → Tutte le parole** e nel
+vocabolario. Il ripasso libero non invia valutazioni al server e non cambia
+scadenze o statistiche. Il primo ripasso programmato avviene il giorno successivo.
+La serie giornaliera avanza dopo aver visto tutte le parole disponibili per il
+proprio obiettivo e completato i ripassi dovuti. Le giornate seguono UTC.
+
+## Catalogo e pronuncia
+
+Il catalogo incluso contiene oltre 20.000 parole con significati italiani,
+importate dal Wikizionario italiano tramite Kaikki. Il server le importa in
+blocchi all’avvio; non servono chiamate a un dizionario esterno durante lo studio.
+Le 56 voci editoriali restano prioritarie. Le importazioni ripetute preservano
+identificativi, progressi e correzioni esistenti.
+
+Per aggiornare il file incluso:
+
+```sh
+cd backend
+npm run catalog:download
+npm run build
+```
+
+Per importarlo esplicitamente nel database configurato: `npm run seed`.
+Le fonti, le licenze e i filtri applicati sono descritti in
+[CATALOG-SOURCES.md](backend/src/data/CATALOG-SOURCES.md).
+Le voci importate non ricevono livelli CEFR o esempi inventati. L’esercizio
+“Completa la frase” è disponibile solo per le parole con un esempio.
+
+La pronuncia usa prima un audio collegato a Wikimedia Commons, quando disponibile;
+in alternativa seleziona una voce inglese del dispositivo, preferendo en-GB.
+Se nessuna voce inglese è installata, mostra un messaggio invece di usare una
+voce italiana. Per parole ambigue, la sintesi usa l’esempio quando presente.

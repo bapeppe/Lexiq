@@ -9,7 +9,8 @@
     "test": "tsx --test tests/*.test.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "seed": "tsx src/scripts/seed.ts"
+    "seed": "tsx src/scripts/seed.ts",
+    "catalog:download": "tsx src/scripts/download-catalog.ts"
   },
   "keywords": [],
   "author": "",

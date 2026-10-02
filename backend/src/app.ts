@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { User, UserWordProgress, Streak } from './models';
 import { Session, ReviewSubmission } from './http/models';
 import { hashPassword, verifyPassword, tokenHash, rateLimit } from './http/security';
-import { acquireDaily, completeDay, dailyStatus, HttpError, pendingReviews, serializeProgress } from './http/service';
+import { acquireDaily, seeWord, completeDay, dailyStatus, HttpError, pendingReviews, serializeProgress } from './http/service';
 import { scheduleReview, masteryLevel, endOfUtcDay } from './lib/srs';
 
 z.config(z.locales.it());
@@ -14,7 +14,7 @@ z.config(z.locales.it());
 const idSchema = z.string().regex(/^[a-f\d]{24}$/i, 'Identificativo della scheda non valido');
 const reviewSchema = z.object({ progressId: idSchema, rating: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]), submissionId: z.uuid() }).strict();
 const loginSchema = z.object({ email: z.email().max(254).transform(value => value.toLowerCase().trim()), password: z.string().min(1).max(128) }).strict();
-const signupSchema = loginSchema.extend({ name: z.string().trim().min(2).max(80), password: z.string().min(10).max(128) });
+const signupSchema = loginSchema.extend({ name: z.string().trim().min(2).max(80), password: z.string().min(10).max(128), dailyTarget: z.number().int().min(1).max(20).default(4) });
 const sessionDays = 30;
 const dummyHash = hashPassword('unavailable account dummy password');
 const asyncRoute = (handler: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => { void handler(req, res).catch(next); };
@@ -52,12 +52,12 @@ export function createApp() {
     await Session.create({ userId, tokenHash: tokenHash(token), expiresAt: new Date(Date.now() + sessionDays * 86400000) });
     res.cookie('lexiq_session', token, cookieOptions);
   }
-  function publicUser(user: any) { return { id: String(user._id), name: user.name, email: user.email }; }
+  function publicUser(user: any) { return { id: String(user._id), name: user.name, email: user.email, dailyTarget: user.dailyTarget ?? 4 }; }
   app.post('/api/auth/signup', asyncRoute(async (req, res) => {
     const data = signupSchema.parse(req.body);
     const passwordHash = await hashPassword(data.password);
     try {
-      const user = await User.create({ name: data.name, email: data.email, passwordHash });
+      const user = await User.create({ name: data.name, email: data.email, passwordHash, dailyTarget: data.dailyTarget });
       await startSession(String(user._id), res); res.status(201).json({ user: publicUser(user) });
     } catch (error: any) { if (error.code === 11000) throw new HttpError(409, 'Esiste già un account con questo indirizzo email.'); throw error; }
   }));
@@ -144,13 +144,17 @@ export function createApp() {
     if (req.headers['sec-fetch-mode'] === 'navigate') throw new HttpError(403, 'Apri le parole del giorno all’interno di Lexiq.');
     res.json(await acquireDaily(res.locals.userId));
   }));
+  app.post('/api/words/seen', asyncRoute(async (req, res) => {
+    const { wordId } = z.object({ wordId: idSchema }).strict().parse(req.body);
+    res.json(await seeWord(res.locals.userId, wordId));
+  }));
   app.get('/api/vault', asyncRoute(async (req, res) => {
     const query = z.object({ q: z.string().max(80).optional(), mastery: z.enum(['learning', 'familiar', 'mastered']).optional() }).strict().parse(req.query);
     const filter: any = { userId: res.locals.userId };
     if (query.mastery) filter.mastery = query.mastery[0]!.toUpperCase() + query.mastery.slice(1);
     const cards = await UserWordProgress.find(filter).populate('wordId').sort({ createdAt: -1 });
     const needle = query.q?.toLowerCase().trim();
-    res.json({ cards: cards.map(serializeProgress).filter(card => !needle || `${card.word.word} ${card.word.definition}`.toLowerCase().includes(needle)) });
+    res.json({ cards: cards.map(serializeProgress).filter(card => !needle || `${card.word.word} ${card.word.definition} ${card.word.senses.map((sense: any) => sense.definition).join(" ")}`.toLowerCase().includes(needle)) });
   }));
   app.get('/api/stats', asyncRoute(async (_req, res) => {
     const cards = await UserWordProgress.find({ userId: res.locals.userId }).lean();
