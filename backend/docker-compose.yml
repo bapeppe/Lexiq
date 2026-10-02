@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    container_name: mern-backend
+    restart: unless-stopped
+    ports:
+      # Modifica 5000 se il tuo server Express usa una porta diversa
+      - "5000:5000"
+    environment:
+      # Questa variabile verrà iniettata da Portainer per sicurezza
+      - MONGO_URI=${MONGO_URI}
