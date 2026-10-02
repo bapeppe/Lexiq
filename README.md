@@ -32,10 +32,10 @@ Vite serves port 3000 and proxies relative `/api` requests to the native backend
 
 | Service | Endpoint / configuration |
 | --- | --- |
-| `lexiq-frontend` | `http://100.96.72.20:3000`, stack file `frontend/docker-compose.yml` |
-| `lexiq-backend` | `http://100.96.72.20:5000`, stack file `backend/docker-compose.yml` |
+| `lexiq-frontend` | , stack file `frontend/docker-compose.yml` |
+| `lexiq-backend` | , stack file `backend/docker-compose.yml` |
 | `mern-database` | Existing MongoDB service and persistent volumes; unchanged |
-| Database | `mongodb://100.96.72.20:27017/lexiq_db` |
+| Database | `` |
 
 Set the values in [.env.example](.env.example) in Portainer. Keep real `.env` files private. The frontend reads `VITE_API_URL` at build time, with `API_URL` as a configuration fallback. Production defaults to the Tailscale API, and development defaults to relative paths. The API wrapper contains no static server address. Rebuild the frontend after changing its API URL.
 

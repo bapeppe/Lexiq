@@ -1184,6 +1184,19 @@ function App() {
                         touchStart.current = null;
                       }}
                     >
+                      <div className="review-card-top">
+                        <div className="review-card-level">
+                          {!revealed && current.word.level && (
+                            <span className="badge">{current.word.level}</span>
+                          )}
+                        </div>
+                        <span className="review-card-caption">
+                          {revealed ? "ECCO LA PAROLA" : "PROVA A RICORDARE"}
+                        </span>
+                        <span className="card-dots" aria-hidden="true">
+                          •••
+                        </span>
+                      </div>
                       {revealed ? (
                         <>
                           <WordDetail word={current.word} onError={setError} />
@@ -1199,7 +1212,10 @@ function App() {
                       ) : activeMode === "flashcard" ? (
                         <div className="review-prompt">
                           <h2 lang="en">{current.word.word}</h2>
-                          <p>Ricordi il significato?</p>
+                          {current.word.ipa && (
+                            <span className="ipa">{current.word.ipa}</span>
+                          )}
+                          <p>Ricordi il significato di questa parola?</p>
                           <button
                             className="button secondary"
                             onClick={() => setRevealed(true)}
@@ -1331,6 +1347,10 @@ function App() {
                     ) : (
                       <p className="keyboard-hint">
                         <kbd>Spazio</kbd> per mostrare la risposta
+                        <span className="hint-divider" aria-hidden="true">
+                          ·
+                        </span>
+                        Scorri la scheda sul telefono
                       </p>
                     )}
                   </div>
