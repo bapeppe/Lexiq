@@ -15,7 +15,7 @@ services:
     ports:
       - "${BACKEND_PORT:-5000}:5000"
     environment:
-      - MONGO_URI=mongodb://mern-db:27017/lexiq_db
+      - MONGO_URI=mongodb://admin:giuseppe20@mern-db:27017/lexiq_db?authSource=admin
       - NODE_ENV=production
       - PORT=5000
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
