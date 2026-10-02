@@ -95,6 +95,20 @@ test('authenticated daily habit API integrates with MongoDB', { timeout: 60000 }
     assert.equal(completed.acquiredToday, 4); assert.equal(completed.streak, 1); assert.equal(completed.completedToday, true);
     assert.equal((await request('/api/vault')).data.cards.length, 4);
   });
+  await t.test('quiz uses catalogue definitions and checks access', async () => {
+    const vault = (await request('/api/vault')).data.cards;
+    const word = vault[0].word;
+    const result = await request(`/api/reviews/quiz-options?wordId=${word.id}`);
+    assert.equal(result.response.status, 200);
+    assert.equal(result.data.wordId, word.id);
+    assert.equal(result.data.options.length, 4);
+    assert.equal(new Set(result.data.options).size, 4);
+    assert.equal(result.data.options.filter((option: string) => option === word.definition).length, 1);
+    assert.equal((await request(`/api/reviews/quiz-options?wordId=${word.id}`, undefined, '')).response.status, 401);
+    assert.equal((await request('/api/reviews/quiz-options?wordId=bad')).response.status, 400);
+    const outsider = await Word.findOne({ _id: { $nin: vault.map((card: any) => card.word.id) } });
+    assert.equal((await request(`/api/reviews/quiz-options?wordId=${outsider!._id}`)).response.status, 404);
+  });
   let cards: any[] = [];
   await t.test('daily gate excludes new words until reviews complete', async () => {
     await UserWordProgress.updateMany({}, { $set: { nextReviewDate: new Date(Date.now() - 86400000) } });

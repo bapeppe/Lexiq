@@ -64,7 +64,7 @@ type Stats = {
   }[];
 };
 type View = "today" | "review" | "discover" | "vault";
-type Mode = "flashcard" | "recall" | "cloze";
+type Mode = "quiz" | "flashcard" | "recall" | "cloze";
 type DailyWords = { words: Word[]; seenIds: string[]; status: Status };
 const masteryLabels = {
   learning: "Da imparare",
@@ -72,6 +72,7 @@ const masteryLabels = {
   mastered: "Padroneggiate",
 };
 const modeLabels = {
+  quiz: "Quiz",
   flashcard: "Schede",
   recall: "Scrivi la parola",
   cloze: "Completa la frase",
@@ -479,9 +480,12 @@ function App() {
   const [failedWordId, setFailedWordId] = useState<string | null>(null);
   const [saveAttempt, setSaveAttempt] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState<Mode>("flashcard");
+  const [mode, setMode] = useState<Mode>("quiz");
   const [revealed, setRevealed] = useState(false);
   const [answer, setAnswer] = useState("");
+  const [quiz, setQuiz] = useState<{ wordId: string; options: string[] } | null>(null);
+  const [quizError, setQuizError] = useState("");
+  const [quizAttempt, setQuizAttempt] = useState(0);
   const [reviewTab, setReviewTab] = useState<"due" | "all">("due");
   const [practice, setPractice] = useState<Card[] | null>(null);
   const [query, setQuery] = useState("");
@@ -595,6 +599,33 @@ function App() {
   }, [discoveryWord, discoverySeen, saveAttempt, refresh, celebrateGoal]);
   const current = practice ? practice[0] : due[0];
   const freeReview = practice !== null;
+  const quizWordId = current?.word.id;
+  useEffect(() => {
+    if (!quizWordId) return;
+    let active = true;
+    void Promise.resolve()
+      .then(() => {
+        if (!active) return null;
+        setQuizError("");
+        return api<{ wordId: string; options: string[] }>(
+          `/reviews/quiz-options?wordId=${quizWordId}`,
+        );
+      })
+      .then((result) => {
+        if (!active || !result) return;
+        setQuiz(result);
+        setQuizError("");
+      })
+      .catch((err) => {
+        if (active) setQuizError((err as Error).message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [quizWordId, quizAttempt]);
+  const quizReady = quiz?.wordId === quizWordId;
+  const quizCorrect = answer === current?.word.definition;
+  const quizRating = quizCorrect ? 3 : 1;
   const submitReview = useCallback(
     async (rating: number) => {
       if (!current || busy || !revealed) return;
@@ -645,6 +676,20 @@ function App() {
         )
       )
         return;
+      if (mode === "quiz") {
+        if (!revealed && quizReady && /^[1-4]$/.test(event.key)) {
+          const option = quiz?.options[Number(event.key) - 1];
+          if (option) {
+            event.preventDefault();
+            setAnswer(option);
+            setRevealed(true);
+          }
+        } else if (revealed && event.key === "Enter") {
+          event.preventDefault();
+          void submitReview(quizRating);
+        }
+        return;
+      }
       if (event.code === "Space") {
         event.preventDefault();
         setRevealed(true);
@@ -664,6 +709,10 @@ function App() {
     reviewTab,
     revealed,
     submitReview,
+    mode,
+    quizReady,
+    quiz,
+    quizRating,
   ]);
   const navigate = (next: View) => {
     if (busy || wordSaving.current || retryRating !== null) return;
@@ -1166,7 +1215,7 @@ function App() {
                     </button>
                   </div>
                 ) : (
-                  <div className="study-wrap">
+                  <div className={`study-wrap${activeMode === "quiz" ? " quiz-review" : ""}`}>
                     <div className="study-toolbar">
                       <span className="muted">
                         {freeReview
@@ -1207,6 +1256,7 @@ function App() {
                       }}
                       onTouchEnd={(event) => {
                         if (
+                          activeMode !== "quiz" &&
                           touchStart.current !== null &&
                           Math.abs(
                             event.changedTouches[0].clientX -
@@ -1224,13 +1274,83 @@ function App() {
                           )}
                         </div>
                         <span className="review-card-caption">
-                          {revealed ? "ECCO LA PAROLA" : "PROVA A RICORDARE"}
+                          {activeMode === "quiz"
+                            ? "SCEGLI IL SIGNIFICATO"
+                            : revealed ? "ECCO LA PAROLA" : "PROVA A RICORDARE"}
                         </span>
                         <span className="card-dots" aria-hidden="true">
                           •••
                         </span>
                       </div>
-                      {revealed ? (
+                      {activeMode === "quiz" ? (
+                        <div className="review-prompt quiz-prompt">
+                          <h2 lang="en">{current.word.word}</h2>
+                          {current.word.ipa && (
+                            <span className="ipa">{current.word.ipa}</span>
+                          )}
+                          <p>Qual è il significato corretto?</p>
+                          {quizError ? (
+                            <div className="quiz-error" role="alert">
+                              <p>{quizError}</p>
+                              <button
+                                className="button secondary"
+                                onClick={() => {
+                                  setQuizError("");
+                                  setQuiz(null);
+                                  setQuizAttempt((attempt) => attempt + 1);
+                                }}
+                              >
+                                Riprova
+                              </button>
+                            </div>
+                          ) : !quizReady ? (
+                            <p className="muted" role="status">Preparo le alternative…</p>
+                          ) : (
+                            <div
+                              className="quiz-options"
+                              role="group"
+                              aria-label="Scegli il significato italiano"
+                            >
+                              {quiz.options.map((option, index) => {
+                                const correct = revealed && option === current.word.definition;
+                                const wrong = revealed && option === answer && !correct;
+                                return (
+                                  <button
+                                    key={option}
+                                    className={`quiz-option${correct ? " is-correct" : ""}${wrong ? " is-wrong" : ""}`}
+                                    disabled={revealed || busy}
+                                    aria-pressed={revealed && option === answer}
+                                    onClick={() => {
+                                      setAnswer(option);
+                                      setRevealed(true);
+                                    }}
+                                  >
+                                    <span className="quiz-option-number" aria-hidden="true">
+                                      {index + 1}
+                                    </span>
+                                    <span>{option}</span>
+                                    {correct && <Check size={18} aria-label="Risposta corretta" />}
+                                    {wrong && <X size={18} aria-label="Risposta sbagliata" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {revealed && (
+                            <>
+                              <p className={`quiz-feedback${quizCorrect ? " is-correct" : ""}`} role="status">
+                                {quizCorrect
+                                  ? "Esatto! Hai scelto il significato corretto."
+                                  : `Non è la risposta giusta. Il significato corretto è: ${current.word.definition}`}
+                              </p>
+                              <details className="quiz-details">
+                                <summary>Rivedi i dettagli della parola</summary>
+                                <WordDetail word={current.word} onError={setError} />
+                              </details>
+                            </>
+                          )}
+                        </div>
+                      ) : revealed ? (
                         <>
                           <WordDetail word={current.word} onError={setError} />
                           {activeMode !== "flashcard" && (
@@ -1334,14 +1454,21 @@ function App() {
                     {revealed ? (
                       <div className="rating-section">
                         <p>
-                          {freeReview
-                            ? "Passa alla prossima parola"
-                            : "Quanto bene hai ricordato?"}
+                          {activeMode === "quiz"
+                            ? (!freeReview && !quizCorrect
+                                ? "Questa parola resta da ripassare: la ritroverai nel quiz."
+                                : "Continua quando vuoi.")
+                            : freeReview
+                              ? "Passa alla prossima parola"
+                              : "Quanto bene hai ricordato?"}
                         </p>
-                        {freeReview ? (
+                        {activeMode === "quiz" || freeReview ? (
                           <button
                             className="button primary full"
-                            onClick={() => void submitReview(3)}
+                            disabled={busy}
+                            onClick={() =>
+                              void submitReview(activeMode === "quiz" ? quizRating : 3)
+                            }
                           >
                             Prossima parola
                             <ArrowRight size={18} />
@@ -1379,11 +1506,11 @@ function App() {
                       </div>
                     ) : (
                       <p className="keyboard-hint">
-                        <kbd>Spazio</kbd> per mostrare la risposta
-                        <span className="hint-divider" aria-hidden="true">
-                          ·
-                        </span>
-                        Scorri la scheda sul telefono
+                        {activeMode === "quiz" ? <><kbd>1–4</kbd> per scegliere una risposta</> : <>
+                          <kbd>Spazio</kbd> per mostrare la risposta
+                          <span className="hint-divider" aria-hidden="true">·</span>
+                          Scorri la scheda sul telefono
+                        </>}
                       </p>
                     )}
                   </div>

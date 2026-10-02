@@ -3,11 +3,12 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import { User, UserWordProgress, Streak } from './models';
+import { User, UserWordProgress, Streak, Word } from './models';
 import { Session, ReviewSubmission } from './http/models';
 import { hashPassword, verifyPassword, tokenHash, rateLimit } from './http/security';
 import { acquireDaily, seeWord, completeDay, dailyStatus, HttpError, pendingReviews, serializeProgress } from './http/service';
 import { scheduleReview, masteryLevel, endOfUtcDay } from './lib/srs';
+import { quizOptions } from './lib/quiz';
 
 z.config(z.locales.it());
 
@@ -139,6 +140,21 @@ export function createApp() {
     await ReviewSubmission.updateOne({ _id: claim._id }, { $set: { result } });
     if (await pendingReviews(userId) === 0) await completeDay(userId);
     res.json({ progress: result, status: await dailyStatus(userId) });
+  }));
+  app.get('/api/reviews/quiz-options', asyncRoute(async (req, res) => {
+    const { wordId } = z.object({ wordId: idSchema }).strict().parse(req.query);
+    if (!await UserWordProgress.exists({ userId: res.locals.userId, wordId })) throw new HttpError(404, 'Parola non presente nel tuo vocabolario.');
+    const word = await Word.findById(wordId).lean();
+    if (!word) throw new HttpError(404, 'Parola non trovata.');
+    const candidates = await Word.aggregate([
+      { $match: { _id: { $ne: word._id }, definition: { $type: 'string', $ne: '' } } },
+      { $sample: { size: 100 } },
+      { $project: { term: 1, definition: 1, partOfSpeech: 1 } },
+    ]);
+    candidates.sort((a, b) => Number(b.partOfSpeech === word.partOfSpeech) - Number(a.partOfSpeech === word.partOfSpeech));
+    const options = quizOptions(word, candidates);
+    if (options.length < 2) throw new HttpError(409, 'Non ci sono ancora abbastanza significati per preparare il quiz. Puoi usare la modalità Schede.');
+    res.json({ wordId, options });
   }));
   app.get('/api/words/daily-new', asyncRoute(async (req, res) => {
     if (req.headers['sec-fetch-mode'] === 'navigate') throw new HttpError(403, 'Apri le parole del giorno all’interno di Lexiq.');

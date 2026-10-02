@@ -587,6 +587,89 @@ kbd {
 .cloze-options button:hover {
   border-color: var(--accent);
 }
+.quiz-options {
+  display: grid;
+  gap: 10px;
+  text-align: left;
+}
+.quiz-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 60px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--raised);
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.quiz-option > span:nth-child(2) {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.quiz-option > svg {
+  flex-shrink: 0;
+}
+.quiz-option:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.quiz-option-number {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.quiz-option:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.quiz-option.is-correct {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+.quiz-option.is-correct > svg,
+.quiz-feedback.is-correct {
+  color: var(--accent);
+}
+.quiz-option.is-wrong {
+  border-color: #c7796f;
+  background: color-mix(in srgb, #c7796f 10%, var(--surface));
+}
+.quiz-option.is-wrong > svg {
+  color: #c7796f;
+}
+.quiz-feedback {
+  padding: 14px;
+  margin-top: 18px;
+  border-radius: 8px;
+  background: var(--raised);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.quiz-details {
+  margin-top: 20px;
+  text-align: left;
+}
+.quiz-details summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+}
+.quiz-details[open] summary {
+  margin-bottom: 24px;
+}
+.quiz-error p {
+  font-size: 14px;
+  margin-bottom: 12px;
+}
 .tabs {
   display: flex;
   gap: 8px;
@@ -963,6 +1046,11 @@ kbd {
     background: var(--bg);
     padding: 16px 0 12px;
     box-shadow: 0 -12px 18px var(--bg);
+  }
+  .quiz-review .rating-section {
+    position: static;
+    padding: 0;
+    box-shadow: none;
   }
   .auth-layout {
     gap: 32px;
