@@ -15,7 +15,7 @@ import { seedWords } from '../src/scripts/seed';
 import { utcDay } from '../src/lib/srs';
 
 test('authenticated daily habit API integrates with MongoDB', { timeout: 60000 }, async t => {
-  const temp = await mkdtemp(join(tmpdir(), 'vocaloop-api-'));
+  const temp = await mkdtemp(join(tmpdir(), 'lexiq-api-'));
   const testDatabaseId = randomUUID().replaceAll('-', '');
   const probe = createServer().listen(0, '127.0.0.1'); await once(probe, 'listening');
   const mongoPort = (probe.address() as any).port; await new Promise<void>(resolve => probe.close(() => resolve()));
@@ -33,7 +33,7 @@ test('authenticated daily habit API integrates with MongoDB', { timeout: 60000 }
   let connected = false;
   for (let attempt = 0; attempt < 30 && !connected; attempt++) {
     if (binaryMissing) throw new Error('API tests need mongod on PATH or MONGO_TEST_URI pointing at an isolated test database.');
-    try { await mongoose.connect(process.env.MONGO_TEST_URI || `mongodb://127.0.0.1:${mongoPort}`, { serverSelectionTimeoutMS: 300, dbName: `vocaloop_test_${testDatabaseId}` }); connected = true; }
+    try { await mongoose.connect(process.env.MONGO_TEST_URI || `mongodb://127.0.0.1:${mongoPort}`, { serverSelectionTimeoutMS: 300, dbName: `lexiq_test_${testDatabaseId}` }); connected = true; }
     catch { await new Promise(resolve => setTimeout(resolve, 200)); }
   }
   assert.ok(connected, 'temporary MongoDB starts');
@@ -53,11 +53,18 @@ test('authenticated daily habit API integrates with MongoDB', { timeout: 60000 }
     assert.equal(signup.response.status, 201); assert.equal(signup.data.user.email, 'ada@example.com');
     assert.equal(signup.data.user.passwordHash, undefined);
     const setCookie = signup.response.headers.get('set-cookie')!;
+    assert.match(setCookie, /^lexiq_session=/);
     assert.match(setCookie, /HttpOnly/); assert.match(setCookie, /SameSite=Lax/);
+    if (process.env.COOKIE_SECURE !== 'true') assert.doesNotMatch(setCookie, /; Secure/);
     cookie = setCookie.split(';')[0]!;
     assert.equal((await request('/api/auth/me')).data.user.name, 'Ada');
     assert.equal((await request('/api/auth/login', { email: 'ada@example.com', password: 'wrong' })).response.status, 401);
     assert.equal((await request('/api/reviews/submit', {}, cookie, { Origin: 'https://evil.example' })).response.status, 403);
+    for (const allowed of ['http://100.96.72.20:3000', 'http://localhost:3000', 'http://localhost:5173']) {
+      const result = await request('/api/daily/status', undefined, cookie, { Origin: allowed });
+      assert.equal(result.response.status, 200);
+      assert.equal(result.response.headers.get('access-control-allow-origin'), allowed);
+    }
   });
   await t.test('daily acquisition is persisted, bounded, and concurrency-safe', async () => {
     const results = await Promise.all(Array.from({ length: 5 }, () => request('/api/words/daily-new')));
@@ -89,9 +96,8 @@ test('authenticated daily habit API integrates with MongoDB', { timeout: 60000 }
   });
   await t.test('review replay and racing submissions update exactly once', async () => {
     const payload = { progressId: cards[2].id, rating: 3, submissionId: randomUUID() };
-    const results = await Promise.all([request('/api/reviews/submit', payload), request('/api/reviews/submit', payload)]);
-    assert.equal(results[0]!.response.status, 200); assert.equal(results[1]!.response.status, 200);
-    assert.deepEqual(results[0]!.data.progress, results[1]!.data.progress);
+    const results = await Promise.all(Array.from({ length: 10 }, () => request('/api/reviews/submit', payload)));
+    for (const result of results) { assert.equal(result.response.status, 200); assert.deepEqual(result.data.progress, results[0]!.data.progress); }
     assert.equal((await UserWordProgress.findById(cards[2].id))!.totalReviews, 1);
     assert.equal((await request('/api/reviews/submit', { ...payload, rating: 4 })).response.status, 409);
     const racing = await Promise.all([3, 4].map(rating => request('/api/reviews/submit', { progressId: cards[3].id, rating, submissionId: randomUUID() })));

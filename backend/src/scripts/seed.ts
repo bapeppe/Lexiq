@@ -10,7 +10,6 @@ export async function seedWords() {
 }
 
 if (require.main === module) {
-  const uri = process.env.MONGO_URI;
-  if (!uri) throw new Error('MONGO_URI is required to seed the database');
+  const uri = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://100.96.72.20:27017/lexiq_db';
   mongoose.connect(uri).then(seedWords).catch(error => { console.error('Seed failed:', error.message); process.exitCode = 1; }).finally(() => mongoose.disconnect());
 }

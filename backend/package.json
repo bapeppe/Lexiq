@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js",
+    "dev": "tsx watch src/server.ts",
     "test": "tsx --test tests/*.test.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
@@ -29,5 +29,8 @@
     "nodemon": "^3.1.14",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

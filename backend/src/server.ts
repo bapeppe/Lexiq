@@ -6,14 +6,13 @@ import { User, Word, UserWordProgress, Streak } from './models';
 import { Session, ReviewSubmission } from './http/models';
 
 async function start() {
-  const mongoUri = process.env.MONGO_URI;
-  if (!mongoUri) throw new Error('MONGO_URI is required. Configure your database connection before starting.');
+  const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://100.96.72.20:27017/lexiq_db';
   await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 10000 });
   await seedWords();
   await Promise.all([User.init(), Word.init(), UserWordProgress.init(), Streak.init(), Session.init(), ReviewSubmission.init()]);
   const app = createApp();
   const port = Number(process.env.PORT || 5000);
-  const server = app.listen(port, '0.0.0.0', () => console.log(`VocaLoop API listening on port ${port}`));
+  const server = app.listen(port, '0.0.0.0', () => console.log(`Lexiq API listening on port ${port}`));
   async function shutdown() {
     server.close(async () => { await mongoose.disconnect(); process.exit(0); });
     setTimeout(() => process.exit(1), 10000).unref();

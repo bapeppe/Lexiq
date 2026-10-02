@@ -2,9 +2,15 @@ version: '3.8'
 
 services:
   frontend:
-    build: .
+    build:
+      context: .
+      args:
+        API_URL: ${API_URL:-http://100.96.72.20:5000}
+        VITE_API_URL: ${VITE_API_URL:-${API_URL:-http://100.96.72.20:5000}}
     container_name: mern-frontend
     restart: unless-stopped
+    environment:
+      - API_URL=${API_URL:-http://100.96.72.20:5000}
     ports:
       # Mappa la porta 80 interna di Nginx sulla porta 3000 del tuo server Ryzen
-      - "3000:80"
+      - "${FRONTEND_PORT:-3000}:80"

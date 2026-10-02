@@ -21,19 +21,20 @@ export function createApp() {
   const app = express();
   app.disable('x-powered-by');
   if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
-  const configuredOrigins = process.env.FRONTEND_ORIGIN?.split(',').map(value => value.trim()).filter(Boolean);
-  const origins = configuredOrigins || (process.env.NODE_ENV === 'production' ? [] : ['http://localhost:5173', 'http://127.0.0.1:5173']);
+  const originList = process.env.FRONTEND_ORIGIN?.split(',').map(value => value.trim()).filter(Boolean);
+  const configuredOrigins = originList?.length ? originList : undefined;
+  const origins = configuredOrigins || ['http://100.96.72.20:3000', 'http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:5173', 'http://127.0.0.1:5173'];
   function allowedOrigin(origin: string | undefined, host: string | undefined) {
     if (!origin) return true;
     if (origins.includes(origin)) return true;
     if (configuredOrigins) return false;
     try { const parsed = new URL(origin); return ['http:', 'https:'].includes(parsed.protocol) && parsed.host === host; } catch { return false; }
   }
-  const secure = process.env.COOKIE_SECURE === 'true' || (process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE !== 'false');
+  const secure = process.env.COOKIE_SECURE === 'true';
   const cookieOptions = { httpOnly: true, secure, sameSite: 'lax' as const, path: '/', maxAge: sessionDays * 86400000 };
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Cache-Control', 'no-store');
-    if (!allowedOrigin(req.headers.origin, req.headers.host) || req.headers['sec-fetch-site'] === 'cross-site') {
+    if (!allowedOrigin(req.headers.origin, req.headers.host) || (!req.headers.origin && req.headers['sec-fetch-site'] === 'cross-site')) {
       next(new HttpError(403, 'This request origin is not allowed.')); return;
     }
     next();
@@ -47,7 +48,7 @@ export function createApp() {
   async function startSession(userId: string, res: Response) {
     const token = randomBytes(32).toString('base64url');
     await Session.create({ userId, tokenHash: tokenHash(token), expiresAt: new Date(Date.now() + sessionDays * 86400000) });
-    res.cookie('vocaloop_session', token, cookieOptions);
+    res.cookie('lexiq_session', token, cookieOptions);
   }
   function publicUser(user: any) { return { id: String(user._id), name: user.name, email: user.email }; }
   app.post('/api/auth/signup', asyncRoute(async (req, res) => {
@@ -66,8 +67,8 @@ export function createApp() {
     await startSession(String(user._id), res); res.json({ user: publicUser(user) });
   }));
   app.use('/api', (req, res, next) => { void (async () => {
-    const cookie = req.headers.cookie?.split(';').map(value => value.trim()).find(value => value.startsWith('vocaloop_session='));
-    const token = cookie?.slice('vocaloop_session='.length);
+    const cookie = req.headers.cookie?.split(';').map(value => value.trim()).find(value => value.startsWith('lexiq_session='));
+    const token = cookie?.slice('lexiq_session='.length);
     if (!token || !/^[\w-]{43}$/.test(token)) throw new HttpError(401, 'Please sign in to continue.');
     const session = await Session.findOne({ tokenHash: tokenHash(token), expiresAt: { $gt: new Date() } });
     if (!session) throw new HttpError(401, 'Your session expired. Please sign in again.');
@@ -77,7 +78,7 @@ export function createApp() {
   })().then(() => next()).catch(next); });
   app.get('/api/auth/me', (_req, res) => res.json({ user: res.locals.user }));
   app.post('/api/auth/logout', asyncRoute(async (_req, res) => {
-    await Session.deleteOne({ _id: res.locals.sessionId }); res.clearCookie('vocaloop_session', cookieOptions); res.json({ ok: true });
+    await Session.deleteOne({ _id: res.locals.sessionId }); res.clearCookie('lexiq_session', cookieOptions); res.json({ ok: true });
   }));
   app.get('/api/daily/status', asyncRoute(async (_req, res) => res.json(await dailyStatus(res.locals.userId))));
   app.get('/api/reviews/due', asyncRoute(async (_req, res) => {
@@ -138,7 +139,7 @@ export function createApp() {
     res.json({ progress: result, status: await dailyStatus(userId) });
   }));
   app.get('/api/words/daily-new', asyncRoute(async (req, res) => {
-    if (req.headers['sec-fetch-mode'] === 'navigate') throw new HttpError(403, 'Open your daily words inside VocaLoop.');
+    if (req.headers['sec-fetch-mode'] === 'navigate') throw new HttpError(403, 'Open your daily words inside Lexiq.');
     res.json(await acquireDaily(res.locals.userId));
   }));
   app.get('/api/vault', asyncRoute(async (req, res) => {

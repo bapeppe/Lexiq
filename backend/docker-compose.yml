@@ -7,7 +7,13 @@ services:
     restart: unless-stopped
     ports:
       # Modifica 5000 se il tuo server Express usa una porta diversa
-      - "5000:5000"
+      - "${BACKEND_PORT:-5000}:5000"
     environment:
       # Questa variabile verrà iniettata da Portainer per sicurezza
-      - MONGO_URI=${MONGO_URI}
+      - MONGODB_URI=${MONGODB_URI:-}
+      - MONGO_URI=${MONGO_URI:-}
+      - NODE_ENV=production
+      - PORT=5000
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-}
+      - TRUST_PROXY=${TRUST_PROXY:-0}
