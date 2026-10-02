@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  frontend:
+    build: .
+    container_name: mern-frontend
+    restart: unless-stopped
+    ports:
+      # Mappa la porta 80 interna di Nginx sulla porta 3000 del tuo server Ryzen
+      - "3000:80"
