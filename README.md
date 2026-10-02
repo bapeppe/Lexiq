@@ -9,7 +9,7 @@ Use Node.js 22.12 or later. Docker runs exclusively on the remote server through
 ```sh
 cd backend
 npm ci
-cp .env.example .env
+cp -n .env.example .env
 npm run build
 npm test
 npm run dev
@@ -41,7 +41,7 @@ Set the values in [.env.example](.env.example) in Portainer. Keep real `.env` fi
 
 CORS allows the production frontend, `http://localhost:3000`, and `http://localhost:5173` (plus the corresponding loopback IP origins). `FRONTEND_ORIGIN` can replace those defaults with an explicit origin list. The HTTP topology requires `COOKIE_SECURE=false`; set it to true when using HTTPS. Tokens are opaque, hashed in MongoDB, and delivered in HttpOnly, SameSite=Lax cookies. Only set `TRUST_PROXY=1` when the API sits exclusively behind one trusted reverse proxy.
 
-Published ports remain 3000 and 5000. `FRONTEND_PORT` and `BACKEND_PORT` allow host port overrides without changing service ports. No database service, volume, or existing bridge is replaced. Portainer performs all image builds and deployment; local verification uses Node.js builds, type checks, and tests.
+Published ports remain 3000 and 5000. `FRONTEND_PORT` and `BACKEND_PORT` allow host port overrides without changing service ports. No database service, volume, or existing bridge is replaced. Portainer performs all image builds and deployment; local verification uses Node.js builds, type checks, and tests. The backend runtime uses USER node; nginx uses UID 101. Images expose service ports 5000 and 3000 and include readiness healthchecks. Runtime images contain only compiled assets and required production dependencies.
 
 ## Habit loop and data
 

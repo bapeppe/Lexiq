@@ -1,21 +1,19 @@
-# Usa un'immagine Node.js leggera
-FROM node:22-alpine
-
-# Imposta la cartella di lavoro all'interno del container
-WORKDIR /usr/src/app
-
-# Copia i file delle dipendenze per sfruttare la cache
+FROM node:22-alpine AS build
+WORKDIR /app
 COPY package*.json ./
-
-# Installa i pacchetti npm
-RUN npm install
-
-# Copia tutto il resto del codice del tuo progetto
-COPY . .
+RUN npm ci
+COPY tsconfig.json ./
+COPY src ./src
 RUN npm run build
 
-# Esponi la porta del server (cambia 5000 se usi un'altra porta per Express)
+FROM node:22-alpine AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+COPY --from=build --chown=node:node /app/dist ./dist
+COPY --chown=node:node server.js ./
+USER node
 EXPOSE 5000
-
-# Il comando per avviare la tua app
-CMD ["npm", "start"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD node -e "fetch('http://' + process.env.HOSTNAME + ':' + (process.env.PORT || 5000) + '/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+CMD ["node", "server.js"]

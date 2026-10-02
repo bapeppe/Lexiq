@@ -1,15 +1,19 @@
-version: '3.8'
-
 services:
   backend:
     build: .
     container_name: mern-backend
     restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     ports:
-      # Modifica 5000 se il tuo server Express usa una porta diversa
       - "${BACKEND_PORT:-5000}:5000"
     environment:
-      # Questa variabile verrà iniettata da Portainer per sicurezza
       - MONGODB_URI=${MONGODB_URI:-}
       - MONGO_URI=${MONGO_URI:-}
       - NODE_ENV=production
