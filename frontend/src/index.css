@@ -1250,3 +1250,122 @@ kbd {
     font-size: 0;
   }
 }
+
+.goal-celebration {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+}
+.goal-confetti {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.goal-confetti i {
+  position: absolute;
+  top: -20px;
+  width: 7px;
+  height: 12px;
+  background: #c3dc9d;
+  border-radius: 2px;
+  opacity: 0;
+  animation: goal-confetti-fall var(--duration) var(--delay) ease-in forwards;
+}
+.goal-confetti i:nth-child(3n) {
+  background: #71965e;
+}
+.goal-confetti i:nth-child(3n + 1) {
+  background: #e4e8db;
+}
+.goal-confetti i:nth-child(4n) {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.goal-toast {
+  position: absolute;
+  top: 100px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  padding: 16px 12px 16px 20px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.15);
+  pointer-events: auto;
+  transform: translateX(-50%);
+  animation: goal-toast-arrive 0.35s ease-out;
+}
+.goal-toast strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+}
+.goal-toast p {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+.goal-success-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  background: var(--raised);
+  color: var(--accent);
+  border-radius: 50%;
+}
+@keyframes goal-confetti-fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(0);
+  }
+  8% {
+    opacity: 0.9;
+  }
+  80% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--drift), calc(100dvh + 40px), 0)
+      rotate(var(--rotation));
+  }
+}
+@keyframes goal-toast-arrive {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+@media (max-width: 480px) {
+  .goal-toast {
+    top: 86px;
+    gap: 10px;
+    padding-left: 14px;
+  }
+  .goal-toast strong {
+    font-size: 14px;
+  }
+  .goal-toast p {
+    font-size: 11px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .goal-confetti {
+    display: none;
+  }
+  .goal-toast {
+    animation: none;
+  }
+}

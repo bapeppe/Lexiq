@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { pronounce, stopPronunciation } from "./lib/audio";
+import GoalCelebration from "./components/GoalCelebration";
 
 type User = { id: string; name: string; email: string; dailyTarget: number };
 type Word = {
@@ -488,6 +489,29 @@ function App() {
   const [visibleCount, setVisibleCount] = useState(30);
   const [selected, setSelected] = useState<Word | null>(null);
   const [retryRating, setRetryRating] = useState<number | null>(null);
+  const [celebration, setCelebration] = useState<{
+    day: string;
+    words: number;
+  } | null>(null);
+  const celebratedGoals = useRef(new Set<string>());
+  const dismissCelebration = useCallback(() => setCelebration(null), []);
+  const celebrateGoal = useCallback(
+    (daily: Status) => {
+      if (!user?.id || daily.acquiredToday < daily.dailyLimit) return;
+      const key = `lexiq-goal-celebration:${user.id}`;
+      const goal = `${user.id}:${daily.day}`;
+      if (celebratedGoals.current.has(goal)) return;
+      try {
+        if (localStorage.getItem(key) === daily.day) return;
+        localStorage.setItem(key, daily.day);
+      } catch {
+        /* The in-memory guard still prevents repeated celebrations. */
+      }
+      celebratedGoals.current.add(goal);
+      setCelebration({ day: daily.day, words: daily.dailyLimit });
+    },
+    [user],
+  );
   const pendingSubmission = useRef<{
     progressId: string;
     rating: number;
@@ -555,6 +579,7 @@ function App() {
         setFailedWordId(null);
         setSeenIds((ids) => [...new Set([...ids, discoveryWord.id])]);
         setStatus(result.status);
+        celebrateGoal(result.status);
       })
       .catch((err) => {
         if (active) {
@@ -567,7 +592,7 @@ function App() {
       active = false;
       wordSaving.current = false;
     };
-  }, [discoveryWord, discoverySeen, saveAttempt, refresh]);
+  }, [discoveryWord, discoverySeen, saveAttempt, refresh, celebrateGoal]);
   const current = practice ? practice[0] : due[0];
   const freeReview = practice !== null;
   const submitReview = useCallback(
@@ -682,6 +707,7 @@ function App() {
     try {
       await api("/auth/logout", {});
       stopPronunciation();
+      setCelebration(null);
       setUser(null);
       setStatus(null);
       setStats(null);
@@ -878,6 +904,13 @@ function App() {
   );
   return (
     <div className="app-shell">
+      {celebration && (
+        <GoalCelebration
+          key={celebration.day}
+          words={celebration.words}
+          onDismiss={dismissCelebration}
+        />
+      )}
       <header className="topbar">
         <button
           className="brand"
