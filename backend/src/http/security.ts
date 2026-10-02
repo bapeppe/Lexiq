@@ -22,7 +22,7 @@ export function rateLimit(limit: number, windowMs: number): RequestHandler {
     const now = Date.now();
     if (buckets.size >= 10000) {
       for (const [key, value] of buckets) if (value.expires <= now) buckets.delete(key);
-      if (buckets.size >= 10000) { res.status(429).json({ error: { message: 'Please try again shortly.' } }); return; }
+      if (buckets.size >= 10000) { res.status(429).json({ error: { message: 'Riprova tra poco.' } }); return; }
     }
     const key = req.ip || 'unknown';
     let bucket = buckets.get(key);
@@ -30,7 +30,7 @@ export function rateLimit(limit: number, windowMs: number): RequestHandler {
     bucket.count++;
     if (bucket.count > limit) {
       res.setHeader('Retry-After', Math.ceil((bucket.expires - now) / 1000));
-      res.status(429).json({ error: { message: 'Too many requests. Please try again later.' } }); return;
+      res.status(429).json({ error: { message: 'Troppe richieste. Riprova più tardi.' } }); return;
     }
     next();
   };

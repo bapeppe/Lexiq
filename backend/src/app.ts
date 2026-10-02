@@ -9,7 +9,9 @@ import { hashPassword, verifyPassword, tokenHash, rateLimit } from './http/secur
 import { acquireDaily, completeDay, dailyStatus, HttpError, pendingReviews, serializeProgress } from './http/service';
 import { scheduleReview, masteryLevel, endOfUtcDay } from './lib/srs';
 
-const idSchema = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid card identifier');
+z.config(z.locales.it());
+
+const idSchema = z.string().regex(/^[a-f\d]{24}$/i, 'Identificativo della scheda non valido');
 const reviewSchema = z.object({ progressId: idSchema, rating: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]), submissionId: z.uuid() }).strict();
 const loginSchema = z.object({ email: z.email().max(254).transform(value => value.toLowerCase().trim()), password: z.string().min(1).max(128) }).strict();
 const signupSchema = loginSchema.extend({ name: z.string().trim().min(2).max(80), password: z.string().min(10).max(128) });
@@ -35,7 +37,7 @@ export function createApp() {
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Cache-Control', 'no-store');
     if (!allowedOrigin(req.headers.origin, req.headers.host) || (!req.headers.origin && req.headers['sec-fetch-site'] === 'cross-site')) {
-      next(new HttpError(403, 'This request origin is not allowed.')); return;
+      next(new HttpError(403, 'L’origine di questa richiesta non è consentita.')); return;
     }
     next();
   });
@@ -57,23 +59,23 @@ export function createApp() {
     try {
       const user = await User.create({ name: data.name, email: data.email, passwordHash });
       await startSession(String(user._id), res); res.status(201).json({ user: publicUser(user) });
-    } catch (error: any) { if (error.code === 11000) throw new HttpError(409, 'An account with this email already exists.'); throw error; }
+    } catch (error: any) { if (error.code === 11000) throw new HttpError(409, 'Esiste già un account con questo indirizzo email.'); throw error; }
   }));
   app.post('/api/auth/login', asyncRoute(async (req, res) => {
     const data = loginSchema.parse(req.body);
     const user = await User.findOne({ email: data.email }).select('+passwordHash');
     const valid = await verifyPassword(data.password, user?.passwordHash || await dummyHash);
-    if (!user || !valid) throw new HttpError(401, 'Email or password is incorrect.');
+    if (!user || !valid) throw new HttpError(401, 'Email o password non corretta.');
     await startSession(String(user._id), res); res.json({ user: publicUser(user) });
   }));
   app.use('/api', (req, res, next) => { void (async () => {
     const cookie = req.headers.cookie?.split(';').map(value => value.trim()).find(value => value.startsWith('lexiq_session='));
     const token = cookie?.slice('lexiq_session='.length);
-    if (!token || !/^[\w-]{43}$/.test(token)) throw new HttpError(401, 'Please sign in to continue.');
+    if (!token || !/^[\w-]{43}$/.test(token)) throw new HttpError(401, 'Accedi per continuare.');
     const session = await Session.findOne({ tokenHash: tokenHash(token), expiresAt: { $gt: new Date() } });
-    if (!session) throw new HttpError(401, 'Your session expired. Please sign in again.');
+    if (!session) throw new HttpError(401, 'La sessione è scaduta. Accedi di nuovo.');
     const user = await User.findById(session.userId);
-    if (!user) throw new HttpError(401, 'Please sign in to continue.');
+    if (!user) throw new HttpError(401, 'Accedi per continuare.');
     res.locals.userId = String(user._id); res.locals.user = publicUser(user); res.locals.sessionId = session._id;
   })().then(() => next()).catch(next); });
   app.get('/api/auth/me', (_req, res) => res.json({ user: res.locals.user }));
@@ -93,7 +95,7 @@ export function createApp() {
         $setOnInsert: { userId, submissionId: data.submissionId, progressId: data.progressId, rating: data.rating },
       }, { upsert: true, returnDocument: 'after' }).lean();
     } catch (error: any) { if (error.code !== 11000) throw error; claim = await ReviewSubmission.findOne({ userId, submissionId: data.submissionId }).lean(); }
-    if (!claim || String(claim.progressId) !== data.progressId || claim.rating !== data.rating) throw new HttpError(409, 'Submission identifier was already used for another review.');
+    if (!claim || String(claim.progressId) !== data.progressId || claim.rating !== data.rating) throw new HttpError(409, 'L’identificativo della risposta è già stato utilizzato per un altro ripasso.');
     if (claim.result) {
       if (await pendingReviews(userId) === 0) await completeDay(userId);
       res.json({ progress: claim.result, status: await dailyStatus(userId) }); return;
@@ -101,21 +103,21 @@ export function createApp() {
     const previous: any = await UserWordProgress.findOne({ userId, 'reviewReceipts.submissionId': data.submissionId }).lean();
     if (previous) {
       const receipt = previous.reviewReceipts.find((item: any) => item.submissionId === data.submissionId);
-      if (String(previous._id) !== data.progressId || receipt.rating !== data.rating) throw new HttpError(409, 'Submission identifier was already used for another review.');
+      if (String(previous._id) !== data.progressId || receipt.rating !== data.rating) throw new HttpError(409, 'L’identificativo della risposta è già stato utilizzato per un altro ripasso.');
       await ReviewSubmission.updateOne({ _id: claim._id }, { $set: { result: receipt.result } });
       if (await pendingReviews(userId) === 0) await completeDay(userId);
       res.json({ progress: receipt.result, status: await dailyStatus(userId) }); return;
     }
     const progress: any = await UserWordProgress.findOne({ _id: data.progressId, userId }).lean();
-    if (!progress) throw new HttpError(404, 'Review card was not found.');
+    if (!progress) throw new HttpError(404, 'Scheda di ripasso non trovata.');
     const racedReceipt = progress.reviewReceipts?.find((item: any) => item.submissionId === data.submissionId);
     if (racedReceipt) {
-      if (racedReceipt.rating !== data.rating) throw new HttpError(409, 'Submission identifier was already used for another review.');
+      if (racedReceipt.rating !== data.rating) throw new HttpError(409, 'L’identificativo della risposta è già stato utilizzato per un altro ripasso.');
       await ReviewSubmission.updateOne({ _id: claim._id }, { $set: { result: racedReceipt.result } });
       if (await pendingReviews(userId) === 0) await completeDay(userId);
       res.json({ progress: racedReceipt.result, status: await dailyStatus(userId) }); return;
     }
-    if (progress.nextReviewDate > endOfUtcDay()) throw new HttpError(409, 'This card has already been reviewed today.');
+    if (progress.nextReviewDate > endOfUtcDay()) throw new HttpError(409, 'Questa scheda è già stata ripassata oggi.');
     const now = new Date();
     const repeating = progress.pendingReviewDate && progress.pendingReviewDate > endOfUtcDay(now);
     const scheduled = repeating ? { interval: progress.interval, easeFactor: progress.easeFactor, repetitions: progress.repetitions, nextReviewDate: progress.pendingReviewDate } : scheduleReview(progress, data.rating, now);
@@ -131,7 +133,7 @@ export function createApp() {
     if (!updated) {
       const retry: any = await UserWordProgress.findOne({ _id: progress._id, 'reviewReceipts.submissionId': data.submissionId }).lean();
       const receipt = retry?.reviewReceipts.find((item: any) => item.submissionId === data.submissionId);
-      if (!receipt || receipt.rating !== data.rating) throw new HttpError(409, 'This review changed in another session. Refresh and retry.');
+      if (!receipt || receipt.rating !== data.rating) throw new HttpError(409, 'Questo ripasso è stato modificato in un’altra sessione. Aggiorna la pagina e riprova.');
       result = receipt.result;
     }
     await ReviewSubmission.updateOne({ _id: claim._id }, { $set: { result } });
@@ -139,7 +141,7 @@ export function createApp() {
     res.json({ progress: result, status: await dailyStatus(userId) });
   }));
   app.get('/api/words/daily-new', asyncRoute(async (req, res) => {
-    if (req.headers['sec-fetch-mode'] === 'navigate') throw new HttpError(403, 'Open your daily words inside Lexiq.');
+    if (req.headers['sec-fetch-mode'] === 'navigate') throw new HttpError(403, 'Apri le parole del giorno all’interno di Lexiq.');
     res.json(await acquireDaily(res.locals.userId));
   }));
   app.get('/api/vault', asyncRoute(async (req, res) => {
@@ -167,13 +169,13 @@ export function createApp() {
       familiar: cards.filter(card => card.mastery === 'Familiar').length, mastered: cards.filter(card => card.mastery === 'Mastered').length,
       retention: reviewCount ? Math.round(successes / reviewCount * 100) : 0, reviewCount, streak: status.streak, longestStreak: status.longestStreak, retentionHistory });
   }));
-  app.use((_req, _res, next) => next(new HttpError(404, 'Endpoint was not found.')));
+  app.use((_req, _res, next) => next(new HttpError(404, 'Risorsa non trovata.')));
   app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
-    if (error instanceof z.ZodError) { res.status(400).json({ error: { message: 'Please check the submitted information.', fields: error.issues.map(issue => ({ field: issue.path.join('.'), message: issue.message })) } }); return; }
+    if (error instanceof z.ZodError) { res.status(400).json({ error: { message: 'Controlla i dati inseriti.', fields: error.issues.map(issue => ({ field: issue.path.join('.'), message: issue.message })) } }); return; }
     if (error instanceof HttpError) { res.status(error.status).json({ error: { message: error.message } }); return; }
-    if (error.type === 'entity.parse.failed') { res.status(400).json({ error: { message: 'Invalid JSON body.' } }); return; }
-    if (error.type === 'entity.too.large') { res.status(413).json({ error: { message: 'Request body is too large.' } }); return; }
-    console.error('API request failed:', error.name, error.message); res.status(500).json({ error: { message: 'Something went wrong. Please retry.' } });
+    if (error.type === 'entity.parse.failed') { res.status(400).json({ error: { message: 'Il contenuto della richiesta non è un JSON valido.' } }); return; }
+    if (error.type === 'entity.too.large') { res.status(413).json({ error: { message: 'Il contenuto della richiesta è troppo grande.' } }); return; }
+    console.error('API request failed:', error.name, error.message); res.status(500).json({ error: { message: 'Si è verificato un errore. Riprova.' } });
   });
   return app;
 }

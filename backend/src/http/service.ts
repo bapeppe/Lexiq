@@ -33,7 +33,7 @@ export async function completeDay(userId: string, now = new Date()) {
     });
     if (updated.modifiedCount) return;
   }
-  throw new HttpError(409, 'Your progress changed. Please retry.');
+  throw new HttpError(409, 'I tuoi progressi sono cambiati. Riprova.');
 }
 export async function dailyStatus(userId: string, now = new Date()) {
   const [pending, streak, acquired] = await Promise.all([
@@ -45,10 +45,10 @@ export async function dailyStatus(userId: string, now = new Date()) {
     completedToday: streak?.lastCompletedDay === utcDay(now), newWordsUnlocked: pending === 0, dailyLimit: 4, acquiredToday: acquired };
 }
 export async function acquireDaily(userId: string, now = new Date()) {
-  if (await pendingReviews(userId, now)) throw new HttpError(423, 'Complete your daily reviews to unlock new words.');
+  if (await pendingReviews(userId, now)) throw new HttpError(423, 'Completa i ripassi di oggi per sbloccare nuove parole.');
   const day = utcDay(now);
   let streak = await ensureStreak(userId);
-  if (!streak) throw new HttpError(503, 'Your account is temporarily unavailable.');
+  if (!streak) throw new HttpError(503, 'Il tuo account è temporaneamente non disponibile.');
   if (streak.acquisitionDay !== day) {
     const learned = await UserWordProgress.find({ userId }).distinct('wordId');
     const words = await Word.find({ _id: { $nin: learned } }).sort({ level: 1, _id: 1 }).limit(4);
