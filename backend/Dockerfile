@@ -12,10 +12,10 @@ RUN npm install
 
 # Copia tutto il resto del codice del tuo progetto
 COPY . .
+RUN npm run build
 
 # Esponi la porta del server (cambia 5000 se usi un'altra porta per Express)
 EXPOSE 5000
 
 # Il comando per avviare la tua app
 CMD ["npm", "start"]
-
