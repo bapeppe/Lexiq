@@ -71,4 +71,4 @@ Space reveals flashcards; 1–4 grade them. Typing and multiple-choice cloze mod
 
 `npm test` in `backend` runs pure SRS tests and real MongoDB integration tests. Supply a local `mongod` executable, or `MONGO_TEST_URI` pointing to a test server. The suite selects a generated database name and drops only that test database. It verifies authentication, origins, acquisition races, queue locking, repeat recall, duplicate/racing submissions, ownership, logout, and streak transitions.
 
-Every checkpoint is built before committing and pushing to `main`, because pushes synchronize the remote Portainer stacks. Dockerfiles and Compose files are reviewed statically on Mac; runtime container checks belong on the remote server.
+Every checkpoint is built before committing and pushing to `main`, because pushes synchronize the remote Portainer stacks. Both services use `pull_policy: build` so Compose rebuilds their source even when an older image is cached ([Compose reference](https://docs.docker.com/reference/compose-file/services/#pull_policy)). Dockerfiles and Compose files are reviewed statically on Mac; runtime container checks belong on the remote server.

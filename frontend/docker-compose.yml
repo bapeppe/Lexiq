@@ -1,5 +1,6 @@
 services:
   frontend:
+    pull_policy: build
     build:
       context: .
       args:
