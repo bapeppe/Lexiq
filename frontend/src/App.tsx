@@ -219,6 +219,44 @@ function WordDetail({
     </>
   );
 }
+function BrandSymbol() {
+  return (
+    <span className="brand-symbol" aria-hidden="true">
+      <Layers size={21} />
+    </span>
+  );
+}
+function PreviewFlashcard() {
+  return (
+    <article className="auth-preview" aria-label="Esempio di flashcard">
+      <div className="preview-head">
+        <span className="badge">B2</span>
+        <Sparkles size={19} aria-hidden="true" />
+      </div>
+      <h2 lang="en">serendipity</h2>
+      <span className="ipa">/ˌser.ənˈdɪp.ə.ti/</span>
+      <p>La felice scoperta di qualcosa che non stavi cercando.</p>
+      <div className="preview-foot">Una parola. Una nuova possibilità.</div>
+    </article>
+  );
+}
+function HomeFlashcard() {
+  return (
+    <div className="home-flashcard" aria-hidden="true">
+      <div className="visual-card-back">
+        <Layers size={28} />
+      </div>
+      <div className="visual-card-front">
+        <span>PAROLA DOPO PAROLA</span>
+        <div className="visual-symbol">
+          Aa<span>↗</span>
+        </div>
+        <div className="visual-line" />
+        <small>Impara. Ricorda. Ripeti.</small>
+      </div>
+    </div>
+  );
+}
 function Auth({ onLogin }: { onLogin: (user: User) => void }) {
   const [signup, setSignup] = useState(true);
   const [target, setTarget] = useState(5);
@@ -228,7 +266,10 @@ function Auth({ onLogin }: { onLogin: (user: User) => void }) {
     <main className="auth-layout">
       <section className="auth-intro">
         <a className="brand" href="/">
-          lexiq<span>.</span>
+          <BrandSymbol />
+          <span className="brand-name">
+            lexiq<span>.</span>
+          </span>
         </a>
         <h1>
           Il tuo inglese,
@@ -240,6 +281,7 @@ function Auth({ onLogin }: { onLogin: (user: User) => void }) {
           <br />
           Bastano pochi minuti al giorno.
         </p>
+        <PreviewFlashcard />
       </section>
       <form
         className="auth-form panel"
@@ -842,7 +884,10 @@ function App() {
           disabled={busy || savingWord || retryRating !== null}
           onClick={() => navigate("today")}
         >
-          lexiq<span>.</span>
+          <BrandSymbol />
+          <span className="brand-name">
+            lexiq<span>.</span>
+          </span>
         </button>
         <nav className="desktop-nav" aria-label="Navigazione principale">
           {nav}
@@ -918,55 +963,58 @@ function App() {
                   )}
                 </div>
                 <section className="daily-panel panel">
-                  <div className="daily-progress">
-                    <span>
-                      <strong>{status.pendingReviews}</strong> da ripassare
-                    </span>
-                    <span>
-                      <strong>
-                        {status.acquiredToday} / {status.dailyLimit}
-                      </strong>{" "}
-                      nuove parole
-                    </span>
-                  </div>
-                  <h2>
-                    {status.pendingReviews
-                      ? "Riprendiamo le parole che conosci."
-                      : dailyFinished
-                        ? "Obiettivo raggiunto per oggi."
-                        : "Scopri le parole di oggi."}
-                  </h2>
-                  <p>
-                    {status.pendingReviews
-                      ? "Un breve ripasso, poi spazio a nuove parole."
-                      : dailyFinished
-                        ? "Puoi rivederle liberamente quando vuoi."
-                        : "Una parola alla volta, al tuo ritmo."}
-                  </p>
-                  <button
-                    className="button primary"
-                    disabled={busy}
-                    onClick={() =>
-                      status.pendingReviews
-                        ? navigate("review")
+                  <div className="daily-copy">
+                    <div className="daily-progress">
+                      <span>
+                        <strong>{status.pendingReviews}</strong> da ripassare
+                      </span>
+                      <span>
+                        <strong>
+                          {status.acquiredToday} / {status.dailyLimit}
+                        </strong>{" "}
+                        nuove parole
+                      </span>
+                    </div>
+                    <h2>
+                      {status.pendingReviews
+                        ? "Riprendiamo le parole che conosci."
                         : dailyFinished
-                          ? startPractice(vault)
-                          : void discover()
-                    }
-                  >
-                    {busy ? (
-                      <LoaderCircle className="spin" size={18} />
-                    ) : status.pendingReviews ? (
-                      "Inizia il ripasso"
-                    ) : dailyFinished ? (
-                      "Ripassa liberamente"
-                    ) : status.acquiredToday ? (
-                      "Continua"
-                    ) : (
-                      "Inizia"
-                    )}
-                    <ArrowRight size={18} />
-                  </button>
+                          ? "Obiettivo raggiunto per oggi."
+                          : "Scopri le parole di oggi."}
+                    </h2>
+                    <p>
+                      {status.pendingReviews
+                        ? "Un breve ripasso, poi spazio a nuove parole."
+                        : dailyFinished
+                          ? "Puoi rivederle liberamente quando vuoi."
+                          : "Una parola alla volta, al tuo ritmo."}
+                    </p>
+                    <button
+                      className="button primary"
+                      disabled={busy}
+                      onClick={() =>
+                        status.pendingReviews
+                          ? navigate("review")
+                          : dailyFinished
+                            ? startPractice(vault)
+                            : void discover()
+                      }
+                    >
+                      {busy ? (
+                        <LoaderCircle className="spin" size={18} />
+                      ) : status.pendingReviews ? (
+                        "Inizia il ripasso"
+                      ) : dailyFinished ? (
+                        "Ripassa liberamente"
+                      ) : status.acquiredToday ? (
+                        "Continua"
+                      ) : (
+                        "Inizia"
+                      )}
+                      <ArrowRight size={18} />
+                    </button>
+                  </div>
+                  <HomeFlashcard />
                 </section>
                 <details
                   className="progress-details"
