@@ -6,7 +6,7 @@ import { User, Word, UserWordProgress, Streak } from './models';
 import { Session, ReviewSubmission } from './http/models';
 
 async function start() {
-  const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://100.96.72.20:27017/lexiq_db';
+  const mongoUri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/lexiq_db';
   await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 10000 });
   await seedWords();
   await Promise.all([User.init(), Word.init(), UserWordProgress.init(), Streak.init(), Session.init(), ReviewSubmission.init()]);

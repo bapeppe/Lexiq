@@ -15,10 +15,17 @@ services:
     ports:
       - "${BACKEND_PORT:-5000}:5000"
     environment:
-      - MONGODB_URI=${MONGODB_URI:-}
-      - MONGO_URI=${MONGO_URI:-}
+      - MONGO_URI=${MONGO_URI}
       - NODE_ENV=production
       - PORT=5000
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
       - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-}
       - TRUST_PROXY=${TRUST_PROXY:-0}
+    networks:
+      - default
+      - mongodb
+
+networks:
+  mongodb:
+    external: true
+    name: ${MONGODB_NETWORK:-mern-database_default}

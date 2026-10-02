@@ -79,14 +79,31 @@ function submissionId() {
 type View = "today" | "review" | "discover" | "vault";
 type Mode = "flashcard" | "recall" | "cloze";
 async function api<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`${import.meta.env.VITE_API_URL}/api${path}`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    ...(body === undefined
-      ? {}
-      : { method: "POST", body: JSON.stringify(body) }),
-  });
-  const result = await response.json();
+  let response: Response;
+  try {
+    response = await fetch(`${import.meta.env.VITE_API_URL}/api${path}`, {
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      ...(body === undefined
+        ? {}
+        : { method: "POST", body: JSON.stringify(body) }),
+    });
+  } catch (err) {
+    throw new Error("Could not connect to the server. Please check your connection.");
+  }
+
+  const text = await response.text();
+  let result: any;
+  try {
+    result = text ? JSON.parse(text) : {};
+  } catch (err) {
+    throw new Error(
+      response.ok
+        ? "Received an invalid response from the server."
+        : `Server error (${response.status}). Please try again later.`
+    );
+  }
+
   if (!response.ok)
     throw new Error(
       result.error?.message ||

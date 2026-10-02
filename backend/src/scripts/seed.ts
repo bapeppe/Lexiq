@@ -10,6 +10,6 @@ export async function seedWords() {
 }
 
 if (require.main === module) {
-  const uri = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://100.96.72.20:27017/lexiq_db';
+  const uri = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/lexiq_db';
   mongoose.connect(uri).then(seedWords).catch(error => { console.error('Seed failed:', error.message); process.exitCode = 1; }).finally(() => mongoose.disconnect());
 }
