@@ -24,14 +24,16 @@ export function createApp() {
   const app = express();
   app.disable('x-powered-by');
   if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
-  const originList = process.env.FRONTEND_ORIGIN?.split(',').map(value => value.trim()).filter(Boolean);
+  const configuredOriginEnv = process.env.FRONTEND_ORIGIN || process.env.CORS_ORIGIN || process.env.CLIENT_URL;
+  const originList = configuredOriginEnv?.split(',').map(value => value.trim()).filter(Boolean);
   const configuredOrigins = originList?.length ? originList : undefined;
-  const origins = configuredOrigins || ['http://100.96.72.20:3000', 'http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:5173', 'http://127.0.0.1:5173'];
+  const origins = configuredOrigins || ['http://192.168.0.252:3000', 'http://192.168.0.252', 'http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:5173', 'http://127.0.0.1:5173'];
   function allowedOrigin(origin: string | undefined, host: string | undefined) {
     if (!origin) return true;
     if (origins.includes(origin)) return true;
+    try { const parsed = new URL(origin); if (['http:', 'https:'].includes(parsed.protocol) && parsed.host === host) return true; } catch { return false; }
     if (configuredOrigins) return false;
-    try { const parsed = new URL(origin); return ['http:', 'https:'].includes(parsed.protocol) && parsed.host === host; } catch { return false; }
+    return false;
   }
   const secure = process.env.COOKIE_SECURE === 'true';
   const cookieOptions = { httpOnly: true, secure, sameSite: 'lax' as const, path: '/', maxAge: sessionDays * 86400000 };

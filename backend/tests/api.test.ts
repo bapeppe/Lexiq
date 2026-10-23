@@ -66,7 +66,7 @@ test('authenticated daily habit API integrates with MongoDB', { timeout: 60000 }
     assert.equal((await request('/api/auth/me')).data.user.name, 'Ada');
     assert.equal((await request('/api/auth/login', { email: 'ada@example.com', password: 'wrong' })).response.status, 401);
     assert.equal((await request('/api/reviews/submit', {}, cookie, { Origin: 'https://evil.example' })).response.status, 403);
-    for (const allowed of ['http://100.96.72.20:3000', 'http://localhost:3000', 'http://localhost:5173']) {
+    for (const allowed of ['http://192.168.0.252:3000', 'http://localhost:3000', 'http://localhost:5173']) {
       const result = await request('/api/daily/status', undefined, cookie, { Origin: allowed });
       assert.equal(result.response.status, 200);
       assert.equal(result.response.headers.get('access-control-allow-origin'), allowed);
