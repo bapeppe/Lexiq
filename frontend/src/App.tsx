@@ -79,8 +79,12 @@ const modeLabels = {
 };
 async function api<T>(path: string, body?: unknown): Promise<T> {
   let response: Response;
+  const baseUrl = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+  const url = baseUrl.endsWith("/api")
+    ? `${baseUrl}${path}`
+    : `${baseUrl}/api${path}`;
   try {
-    response = await fetch(`${import.meta.env.VITE_API_URL}/api${path}`, {
+    response = await fetch(url, {
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       ...(body === undefined

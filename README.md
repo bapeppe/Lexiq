@@ -37,7 +37,7 @@ Vite serves port 3000 and proxies relative `/api` requests to the native backend
 | `mern-database` | Existing MongoDB service and persistent volumes; unchanged |
 | Database | `` |
 
-Set the values in [.env.example](.env.example) in Portainer. Keep real `.env` files private. The frontend reads `VITE_API_URL` at build time, with `API_URL` as a configuration fallback. Production defaults to the Tailscale API, and development defaults to relative paths. The API wrapper contains no static server address. Rebuild the frontend after changing its API URL.
+Set the values in [.env.example](.env.example) in Portainer. Keep real `.env` files private. The frontend reads `VITE_API_URL` at build time, defaulting to the relative `/api` route for Nginx proxy routing. The API wrapper contains no static server address. Rebuild the frontend after changing its API URL.
 
 CORS allows the production frontend, `http://localhost:3000`, and `http://localhost:5173` (plus the corresponding loopback IP origins). `FRONTEND_ORIGIN` can replace those defaults with an explicit origin list. The HTTP topology requires `COOKIE_SECURE=false`; set it to true when using HTTPS. Tokens are opaque, hashed in MongoDB, and delivered in HttpOnly, SameSite=Lax cookies. Only set `TRUST_PROXY=1` when the API sits exclusively behind one trusted reverse proxy.
 

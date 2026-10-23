@@ -4,10 +4,7 @@ import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ mode }) => {
   const env = { ...loadEnv(mode, process.cwd(), ""), ...process.env };
-  const apiUrl =
-    env.VITE_API_URL ??
-    env.API_URL ??
-    (mode === "production" ? "http://100.96.72.20:5000" : "");
+  const apiUrl = env.VITE_API_URL || "/api";
   return {
     plugins: [react(), tailwindcss()],
     define: {

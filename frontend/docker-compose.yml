@@ -4,8 +4,7 @@ services:
     build:
       context: .
       args:
-        API_URL: ${API_URL:-http://100.96.72.20:5000}
-        VITE_API_URL: ${VITE_API_URL:-${API_URL:-http://100.96.72.20:5000}}
+        VITE_API_URL: ${VITE_API_URL:-/api}
     container_name: mern-frontend
     restart: unless-stopped
     init: true

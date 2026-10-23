@@ -1,8 +1,6 @@
 FROM node:22-alpine AS build
 WORKDIR /app
-ARG API_URL=http://100.96.72.20:5000
-ARG VITE_API_URL=http://100.96.72.20:5000
-ENV API_URL=$API_URL
+ARG VITE_API_URL=/api
 ENV VITE_API_URL=$VITE_API_URL
 COPY package*.json ./
 RUN npm ci
